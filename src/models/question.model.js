@@ -5,16 +5,12 @@ const questionSchema = new Schema(
     text: {
       type: String,
       required: true,
-    },
-    // Optional code block for technical questions
-    codeSnippet: {
-      type: String, 
-      default: "",
+      trim: true,
     },
     options: {
-      type: [String], // ["A", "B", "C", "D"]
+      type: [String], // Array of 4 strings
       required: true,
-      validate: [(val) => val.length === 4, '{PATH} must have exactly 4 options'],
+      validate: [arrayLimit, "{PATH} exceeds the limit of 4"],
     },
     correctOptionIndex: {
       type: Number,
@@ -24,43 +20,36 @@ const questionSchema = new Schema(
     },
     explanation: {
       type: String,
-      default: "No explanation provided."
+      default: "",
     },
-
-    // ==========================================
-    // Adaptive Engine Data
-    // ==========================================
-    topics: [{ type: String, index: true }], // ["React", "Hooks"]
-    
-    // "Static" label for humans
     difficulty: {
       type: String,
       enum: ["Easy", "Medium", "Hard"],
-      required: true,
+      default: "Medium",
     },
-    
-    // "Dynamic" rating for the Algorithm (IRT)
     eloRating: { 
       type: Number, 
       default: 1000, 
-      index: true 
+      index: true // Critical for range queries ($gte, $lte)
     },
-
-    // ==========================================
-    // Admin / Quality Control
-    // ==========================================
-    source: {
-      type: String,
-      enum: ["Human", "AI_Groq", "AI_Gemini"],
-      default: "AI_Groq"
+    topics: {
+      type: [String],
+      index: true, // Important for performance
     },
-    // AI questions start as false, Human as true
     isVerified: {
       type: Boolean,
-      default: false 
-    }
+      default: false,
+    },
+    source: {
+      type: String,
+      default: "AI_Groq",
+    },
   },
   { timestamps: true }
 );
+
+function arrayLimit(val) {
+  return val.length === 4;
+}
 
 export const Question = mongoose.model("Question", questionSchema);
