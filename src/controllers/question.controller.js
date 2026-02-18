@@ -1,26 +1,86 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { sendSuccess } from "../utils/ApiResponse.js";
 import { ApiError } from "../utils/ApiError.js";
-import { questionService } from "../services/question.service.js"; // Import the service instance directly
+import { questionService } from "../services/question.service.js";
+import { calculateElo } from "../utils/eloCalculator.js";
+import { Question } from "../models/question.model.js";
+import { User } from "../models/user.model.js";
 
 export const getQuestions = asyncHandler(async (req, res) => {
   const { topic, limit = 5 } = req.query;
 
-  if (!topic) {
-    throw new ApiError(400, "Topic is required");
-  }
+  if (!topic) throw new ApiError(400, "Topic is required");
 
-  // Adaptive Matchmaking: Get User's Elo for this topic
-  // req.user.skillElo is a Map (from User model)
-  const userElo = req.user.skillElo.get(topic) || 1000;
-
-  // Delegate business logic to service
-  const questions = await questionService.getQuestions(topic, Number(limit), userElo);
+  const userElo = req.user.skillElo?.get(topic) ?? 1000;
+  const questions = await questionService.getQuestions(
+    topic,
+    Number(limit),
+    userElo,
+  );
 
   return sendSuccess(
     res,
     questions,
-    `Fetched ${questions.length} questions for topic: ${topic} (Elo: ${userElo})`,
-    200
+    `Fetched ${questions.length} questions for topic: ${topic}`,
+  );
+});
+
+export const submitAnswer = asyncHandler(async (req, res) => {
+  const { questionId, selectedOptionIndex } = req.body;
+
+  if (questionId === undefined || selectedOptionIndex === undefined) {
+    throw new ApiError(400, "questionId and selectedOptionIndex are required");
+  }
+
+  const question = await Question.findById(questionId);
+  if (!question) throw new ApiError(404, "Question not found");
+  console.log(
+    `[submit] question: ${question._id} | topic: ${question.topics?.[0]} | correctIndex: ${question.correctOptionIndex} | eloRating: ${question.eloRating}`,
+  );
+
+  const topic = question.topics?.[0];
+  if (!topic) throw new ApiError(500, "Question has no associated topic");
+
+  const isCorrect = Number(selectedOptionIndex) === question.correctOptionIndex;
+  console.log(
+    `[submit] selectedIndex: ${selectedOptionIndex} | isCorrect: ${isCorrect}`,
+  );
+
+  // Fetch fresh from DB — req.user is a stale snapshot from login time
+  const user = await User.findById(req.user._id).select("skillElo");
+  console.log(`[submit] skillElo map:`, user?.skillElo);
+  const userElo = user?.skillElo?.get(topic) ?? 1000;
+  console.log(`[submit] userElo for "${topic}": ${userElo}`);
+
+  const { newUserElo, newQuestionElo, eloChange } = calculateElo(
+    userElo,
+    question.eloRating,
+    isCorrect,
+  );
+  console.log(
+    `[submit] elo calc → ${userElo} → ${newUserElo} (${eloChange >= 0 ? "+" : ""}${eloChange}) | question: ${question.eloRating} → ${newQuestionElo}`,
+  );
+
+  await Promise.all([
+    Question.findByIdAndUpdate(questionId, {
+      $set: { eloRating: newQuestionElo },
+    }),
+    User.findByIdAndUpdate(req.user._id, {
+      $set: { [`skillElo.${topic}`]: newUserElo },
+    }),
+  ]);
+  console.log(`[submit] DB write done — skillElo.${topic} = ${newUserElo}`);
+
+  return sendSuccess(
+    res,
+    {
+      isCorrect,
+      correctOptionIndex: question.correctOptionIndex,
+      explanation: question.explanation,
+      topic,
+      newElo: newUserElo,
+      eloChange,
+    },
+    isCorrect ? "Correct! Well done." : "Incorrect. Keep practicing!",
   );
 });

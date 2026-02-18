@@ -1,7 +1,7 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { sendSuccess } from "../utils/ApiResponse.js";
 import { authService } from "../services/auth.service.js";
-import { COOKIE_OPTIONS } from "../constants.js";
+import { ACCESS_COOKIE_OPTIONS, REFRESH_COOKIE_OPTIONS } from "../constants.js";
 
 const register = asyncHandler(async (req, res) => {
   const { fullName, email, username, password } = req.body;
@@ -26,13 +26,13 @@ const login = asyncHandler(async (req, res) => {
   });
 
   res
-    .cookie("accessToken", accessToken, COOKIE_OPTIONS)
-    .cookie("refreshToken", refreshToken, COOKIE_OPTIONS);
+    .cookie("accessToken", accessToken, ACCESS_COOKIE_OPTIONS)
+    .cookie("refreshToken", refreshToken, REFRESH_COOKIE_OPTIONS);
 
   return sendSuccess(
     res,
     { user, accessToken, refreshToken },
-    "User logged in successfully"
+    "User logged in successfully",
   );
 });
 
@@ -40,11 +40,27 @@ const logout = asyncHandler(async (req, res) => {
   await authService.logoutUser(req.user._id);
 
   res
-    .clearCookie("accessToken", COOKIE_OPTIONS)
-    .clearCookie("refreshToken", COOKIE_OPTIONS);
+    .clearCookie("accessToken", ACCESS_COOKIE_OPTIONS)
+    .clearCookie("refreshToken", REFRESH_COOKIE_OPTIONS);
 
   return sendSuccess(res, {}, "User logged out successfully");
 });
 
-export { register, login, logout };
+const refreshAccessToken = asyncHandler(async (req, res) => {
+  const incomingToken = req.cookies?.refreshToken || req.body?.refreshToken;
 
+  const { user, accessToken, refreshToken } =
+    await authService.refreshTokens(incomingToken);
+
+  res
+    .cookie("accessToken", accessToken, ACCESS_COOKIE_OPTIONS)
+    .cookie("refreshToken", refreshToken, REFRESH_COOKIE_OPTIONS);
+
+  return sendSuccess(
+    res,
+    { user, accessToken, refreshToken },
+    "Tokens refreshed successfully",
+  );
+});
+
+export { register, login, logout, refreshAccessToken };

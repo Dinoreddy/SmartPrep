@@ -4,126 +4,121 @@ import Groq from "groq-sdk";
 import { User } from "../src/models/user.model.js";
 import { Question } from "../src/models/question.model.js";
 import { generateQuestionsWithGroq } from "../src/utils/aiHelper.js";
+import { DB_NAME } from "../src/constants.js";
 
 dotenv.config();
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-
-// Configuration
-const BATCH_CONFIG = [
-  { count: 15, difficulty: "Easy", elo: 800 },
-  { count: 30, difficulty: "Medium", elo: 1000 },
-  { count: 15, difficulty: "Hard", elo: 1500 }
-];
-
-import { DB_NAME } from "../src/constants.js";
-
 const MONGO_URI = process.env.MONGO_URI;
 
-async function getUniqueSkills() {
-  console.log("🔍 Finding unique skills from users...");
-  
-  // DEBUG SECTION
-  try {
-     // Connect with DB_NAME to ensure we hit the right DB
-     if (mongoose.connection.readyState === 0) {
-        await mongoose.connect(MONGO_URI, { dbName: DB_NAME });
-        console.log(`✅ Connected to DB: ${DB_NAME}`);
-     }
+const BATCH_CONFIG = [
+  { count: 5, difficulty: "Easy", elo: 800 },
+  { count: 10, difficulty: "Medium", elo: 1000 },
+  { count: 5, difficulty: "Hard", elo: 1500 },
+];
 
-     const count = await User.countDocuments();
-     console.log(`📊 Total Users in DB: ${count}`);
-     
-     if (count > 0) {
-        const firstUser = await User.findOne();
-        console.log("👤 First User Found ID:", firstUser._id);
-        console.log("👤 First User Resume Profile:", JSON.stringify(firstUser.resumeProfile, null, 2));
+// const BATCH_CONFIG = [
+//   { count: 15, difficulty: "Easy", elo: 800 },
+//   { count: 30, difficulty: "Medium", elo: 1000 },
+//   { count: 15, difficulty: "Hard", elo: 1500 },
+// ];
 
-        // Check if topSkills field exists specifically
-        const withSkills = await User.countDocuments({ "resumeProfile.topSkills": { $exists: true, $not: { $size: 0 } } });
-        console.log(`� Users with topSkills > 0: ${withSkills}`);
-     } else {
-        console.error("❌ DB appears empty! Check MONGO_URI and collection name.");
-        // List collections to verify
-        const collections = await mongoose.connection.db.listCollections().toArray();
-        console.log("� Available Collections:", collections.map(c => c.name));
-     }
+// Max retries per chunk when the AI returns an empty/invalid response
+const MAX_CHUNK_RETRIES = 3;
+const CHUNK_SIZE = 10;
 
-  } catch (err) {
-     console.error("❌ Error during debug inspection:", err);
+async function connectDB() {
+  if (mongoose.connection.readyState === 0) {
+    await mongoose.connect(MONGO_URI, { dbName: DB_NAME });
+    console.log(`✅ Connected to DB: ${DB_NAME}`);
   }
+}
 
-  // Aggregate all skills from all users
+async function getUniqueSkills() {
   const uniqueSkills = await User.distinct("resumeProfile.topSkills");
-  
-  // Filter out empty or null skills
-  return uniqueSkills.filter(s => s && s.trim().length > 0);
+  return uniqueSkills.filter((s) => s && s.trim().length > 0);
 }
 
 async function generateQuestionsForSkill(skill, count, difficulty, elo) {
-  // Use Helper Function
-  const parsed = await generateQuestionsWithGroq(groq, skill, count, difficulty);
-
-  return parsed.map(q => ({
-      ...q,
-      difficulty,
-      eloRating: elo,
-      source: "AI_Groq_Seed",
-      isVerified: false
+  const parsed = await generateQuestionsWithGroq(
+    groq,
+    skill,
+    count,
+    difficulty,
+  );
+  return parsed.map((q) => ({
+    ...q,
+    difficulty,
+    eloRating: elo,
+    source: "AI_Groq_Seed",
+    isVerified: false,
   }));
 }
 
 async function seed() {
   try {
-    // Connection is handled inside getUniqueSkills or we can do it here globally
     console.log("🌱 Starting Seed Script...");
-    if (mongoose.connection.readyState === 0) {
-        await mongoose.connect(MONGO_URI, { dbName: DB_NAME });
-        console.log(`✅ Connected to DB: ${DB_NAME}`);
-    }
+    await connectDB();
 
     const skills = await getUniqueSkills();
-    console.log(`Found ${skills.length} unique skills:`, skills);
+    console.log(
+      `\n🔍 Found ${skills.length} unique skill(s): ${skills.join(", ")}\n`,
+    );
 
     for (const skill of skills) {
-      console.log(`\n👉 Processing Skill: ${skill}`);
-      
-      for (const config of BATCH_CONFIG) {
-        console.log(`   Generating ${config.count} ${config.difficulty} questions...`);
-        
-        // Split into chunks if count is large (Groq might truncate large responses)
-        // Llama 3.3 70b has good output window, but 30 questions might be tight.
-        // Let's do batches of 10 to be safe.
-        const CHUNK_SIZE = 10;
-        let generatedCount = 0;
-        
-        while (generatedCount < config.count) {
-          const currentBatchSize = Math.min(CHUNK_SIZE, config.count - generatedCount);
-          
-          const questions = await generateQuestionsForSkill(
-            skill, 
-            currentBatchSize, 
-            config.difficulty, 
-            config.elo
-          );
+      console.log(`👉 Processing skill: "${skill}"`);
 
-          if (questions.length > 0) {
-            await Question.insertMany(questions);
-            generatedCount += questions.length;
-            console.log(`      Saved ${questions.length} questions. (Total: ${generatedCount}/${config.count})`);
-          } else {
-            console.warn(`      Skipping batch due to error.`);
-            break; // Stop trying this config if error persists
+      for (const config of BATCH_CONFIG) {
+        console.log(
+          `   [${config.difficulty}] Generating ${config.count} questions...`,
+        );
+
+        let generatedCount = 0;
+
+        while (generatedCount < config.count) {
+          const batchSize = Math.min(CHUNK_SIZE, config.count - generatedCount);
+          let questions = [];
+          let attempt = 0;
+
+          // Retry the chunk until we get results or exhaust retries
+          while (attempt < MAX_CHUNK_RETRIES) {
+            questions = await generateQuestionsForSkill(
+              skill,
+              batchSize,
+              config.difficulty,
+              config.elo,
+            );
+
+            if (questions.length > 0) break;
+
+            attempt++;
+            console.warn(
+              `      ⚠️  Empty response for chunk. Retry ${attempt}/${MAX_CHUNK_RETRIES}...`,
+            );
           }
+
+          if (questions.length === 0) {
+            console.error(
+              `      ❌ Failed to generate chunk after ${MAX_CHUNK_RETRIES} retries. Skipping remaining questions for [${config.difficulty}].`,
+            );
+            break;
+          }
+
+          await Question.insertMany(questions);
+          generatedCount += questions.length;
+          console.log(
+            `      ✅ Saved ${questions.length} questions. (${generatedCount}/${config.count})`,
+          );
         }
       }
+
+      console.log();
     }
 
-    console.log("\n✅ Seeding Complete!");
+    console.log("✅ Seeding Complete!");
     process.exit(0);
-
   } catch (error) {
-    console.error("FATAL ERROR:", error);
+    console.error("❌ Fatal error:", error);
     process.exit(1);
   }
 }

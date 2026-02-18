@@ -1,11 +1,16 @@
 import { Router } from "express";
-import { getQuestions } from "../controllers/question.controller.js";
+import {
+  getQuestions,
+  submitAnswer,
+} from "../controllers/question.controller.js";
 import { verifyJWT } from "../middlewares/auth.middleware.js";
 
 const router = Router();
 
-// Protected route to fetch questions
 // GET /api/v1/questions?topic=React&limit=5
 router.get("/", verifyJWT, getQuestions);
+
+// POST /api/v1/questions/submit
+router.post("/submit", verifyJWT, submitAnswer);
 
 export default router;

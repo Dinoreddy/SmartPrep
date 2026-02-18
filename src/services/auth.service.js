@@ -1,3 +1,4 @@
+import jwt from "jsonwebtoken";
 import { User } from "../models/user.model.js";
 import { ApiError } from "../utils/ApiError.js";
 
@@ -46,7 +47,7 @@ class AuthService {
 
     // 3. Return only safe data
     const createdUser = await User.findById(user._id).select(
-      "-password -refreshToken"
+      "-password -refreshToken",
     );
 
     if (!createdUser) {
@@ -83,7 +84,7 @@ class AuthService {
     const { accessToken, refreshToken } = await this.generateTokens(user._id);
 
     const loggedInUser = await User.findById(user._id).select(
-      "-password -refreshToken"
+      "-password -refreshToken",
     );
 
     return { user: loggedInUser, accessToken, refreshToken };
@@ -98,12 +99,49 @@ class AuthService {
       {
         $unset: { refreshToken: 1 },
       },
-      { new: true }
+      { new: true },
     );
     return true;
+  }
+  /**
+   * Refresh Access + Refresh tokens (Token Rotation)
+   * Security: incoming token must match the one stored in DB to prevent replay attacks.
+   */
+  async refreshTokens(incomingRefreshToken) {
+    if (!incomingRefreshToken) {
+      throw new ApiError(401, "Refresh token is required");
+    }
+
+    let decoded;
+    try {
+      decoded = jwt.verify(
+        incomingRefreshToken,
+        process.env.REFRESH_TOKEN_SECRET,
+      );
+    } catch {
+      throw new ApiError(401, "Invalid or expired refresh token");
+    }
+
+    const user = await User.findById(decoded._id);
+    if (!user) {
+      throw new ApiError(401, "User not found");
+    }
+
+    // Replay attack guard — token must match what's stored in DB
+    if (incomingRefreshToken !== user.refreshToken) {
+      throw new ApiError(401, "Refresh token has already been used or revoked");
+    }
+
+    // generateTokens saves the new refresh token to DB automatically
+    const { accessToken, refreshToken } = await this.generateTokens(user._id);
+
+    const safeUser = await User.findById(user._id).select(
+      "-password -refreshToken",
+    );
+
+    return { user: safeUser, accessToken, refreshToken };
   }
 }
 
 // Export a singleton instance
 export const authService = new AuthService();
-
