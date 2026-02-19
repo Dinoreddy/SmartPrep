@@ -33,6 +33,7 @@ const mockTestSchema = new Schema(
     },
 
     score: { type: Number, default: 0 },
+    percentage: { type: Number, default: 0 },
     totalQuestions: { type: Number, required: true },
 
     status: {

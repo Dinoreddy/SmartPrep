@@ -11,21 +11,35 @@ export const getConfig = asyncHandler(async (req, res) => {
 export const startTest = asyncHandler(async (req, res) => {
   const { selectedSkills } = req.body;
 
-  if (!Array.isArray(selectedSkills) || selectedSkills.length === 0) {
+  if (!Array.isArray(selectedSkills) || selectedSkills.length === 0)
     throw new ApiError(400, "selectedSkills must be a non-empty array");
-  }
 
   const test = await mockTestService.createTest(req.user._id, selectedSkills);
 
-  // toObject() first — converts all subdocuments to plain JS objects,
-  // eliminating Mongoose internals (__parentArray, $__, _doc, etc.)
-  // Then strip correctOptionIndex from the plain questions array.
+  // toObject() converts all Mongoose subdocuments to plain objects before
+  // we strip correctOptionIndex — prevents leaking internal Mongoose fields.
   const plain = test.toObject();
   plain.questions = plain.questions.map(
     ({ correctOptionIndex, ...safe }) => safe,
   );
 
-  const sanitizedTest = plain;
+  return sendSuccess(res, plain, "Mock test started successfully", 201);
+});
 
-  return sendSuccess(res, sanitizedTest, "Mock test started successfully", 201);
+export const submitTest = asyncHandler(async (req, res) => {
+  const { testId } = req.params;
+  const { answers } = req.body;
+
+  if (!answers || typeof answers !== "object" || Array.isArray(answers))
+    throw new ApiError(
+      400,
+      "answers must be an object mapping questionId to selected option index",
+    );
+
+  const result = await mockTestService.submitTest(
+    testId,
+    req.user._id,
+    answers,
+  );
+  return sendSuccess(res, result, "Test submitted successfully");
 });
