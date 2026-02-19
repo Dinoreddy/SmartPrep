@@ -1,45 +1,61 @@
 import Groq from "groq-sdk";
 import { Question } from "../models/question.model.js";
+import { User } from "../models/user.model.js";
 import { generateQuestionsWithGroq } from "../utils/aiHelper.js";
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 class QuestionService {
   /**
-   * Get practice questions (Adaptive Matchmaking)
-   * 1. Check DB for questions matching user's Elo range
-   * 2. If not enough, generate more via AI with appropriate difficulty
-   * 3. Return combined list
+   * Get practice questions with adaptive Elo matchmaking and repetition handling.
+   *
+   * Strategy:
+   *   A. Fresh first  — questions the user has NOT solved yet (within Elo ±200)
+   *   B. Recycle      — if not enough fresh, fill remaining slots with already-solved
+   *                     questions (still within Elo ±200)
+   *   C. AI generate  — if still not enough, generate new ones via Groq
    */
-  async getQuestions(topic, limit = 5, userElo = 1000) {
-    // 1. Define Elo Range (Review Strategy: +/- 200)
+  async getQuestions(topic, limit = 5, userElo = 1000, userId) {
     const minElo = userElo - 200;
     const maxElo = userElo + 200;
+    const eloFilter = {
+      topics: topic,
+      eloRating: { $gte: minElo, $lte: maxElo },
+    };
 
-    // 2. Fetch from DB
-    const existingQuestions = await Question.aggregate([
-      { 
-        $match: { 
-          topics: topic, 
-          eloRating: { $gte: minElo, $lte: maxElo } 
-        } 
-      },
+    // Fetch the user's solved question IDs (lean for efficiency)
+    const userDoc = userId
+      ? await User.findById(userId).select("solvedQuestionIds").lean()
+      : null;
+    const solvedIds = userDoc?.solvedQuestionIds ?? [];
+
+    // Step A: Fresh questions — exclude already-solved ones
+    const freshQuestions = await Question.aggregate([
+      { $match: { ...eloFilter, _id: { $nin: solvedIds } } },
       { $sample: { size: Number(limit) } },
     ]);
 
-    const existingCount = existingQuestions.length;
-    const missingCount = Number(limit) - existingCount;
+    const freshCount = freshQuestions.length;
+    const recycleNeeded = Number(limit) - freshCount;
 
-    // 3. If we have enough, return them
-    if (missingCount <= 0) {
-      return existingQuestions;
+    // Step B: Recycle solved questions to fill remaining slots
+    let recycledQuestions = [];
+    if (recycleNeeded > 0 && solvedIds.length > 0) {
+      const freshIds = freshQuestions.map((q) => q._id);
+      recycledQuestions = await Question.aggregate([
+        { $match: { ...eloFilter, _id: { $nin: freshIds } } },
+        { $sample: { size: recycleNeeded } },
+      ]);
     }
 
-    // 4. Generate missing questions - Adaptive Logic
-    // If user is <= 1050, give them "Easy" (800) questions to build confidence
+    const combined = [...freshQuestions, ...recycledQuestions];
+    const stillMissing = Number(limit) - combined.length;
+
+    // Step C: AI generation if DB doesn't have enough questions at all
+    if (stillMissing <= 0) return combined;
+
     let difficulty = "Medium";
     let baseElo = 1000;
-
     if (userElo <= 1050) {
       difficulty = "Easy";
       baseElo = 800;
@@ -48,27 +64,30 @@ class QuestionService {
       baseElo = 1500;
     }
 
-    console.log(`[Cache Miss] Generating ${missingCount} questions for ${topic} (Elo: ${userElo} -> ${difficulty})...`);
-    
-    // Use Helper Function
-    const parsedQuestions = await generateQuestionsWithGroq(groq, topic, missingCount, difficulty);
-      
-    // Sanitize and Add Metadata
-    const questionsToSave = parsedQuestions.map(q => ({
-        ...q,
-        difficulty,
-        eloRating: baseElo, // Assign standard Elo for this difficulty tier
-        source: "AI_Groq",
-        isVerified: false
+    console.log(
+      `[Cache Miss] Generating ${stillMissing} ${difficulty} questions for "${topic}" (userElo: ${userElo})...`,
+    );
+
+    const parsedQuestions = await generateQuestionsWithGroq(
+      groq,
+      topic,
+      stillMissing,
+      difficulty,
+    );
+
+    const questionsToSave = parsedQuestions.map((q) => ({
+      ...q,
+      difficulty,
+      eloRating: baseElo,
+      source: "AI_Groq",
+      isVerified: false,
     }));
 
-    // Bulk Insert to DB
     if (questionsToSave.length > 0) {
-        await Question.insertMany(questionsToSave);
+      await Question.insertMany(questionsToSave);
     }
 
-    // 5. Return combined
-    return [...existingQuestions, ...questionsToSave];
+    return [...combined, ...questionsToSave];
   }
 }
 

@@ -16,6 +16,7 @@ export const getQuestions = asyncHandler(async (req, res) => {
     topic,
     Number(limit),
     userElo,
+    req.user._id,
   );
 
   return sendSuccess(
@@ -61,15 +62,29 @@ export const submitAnswer = asyncHandler(async (req, res) => {
     `[submit] elo calc → ${userElo} → ${newUserElo} (${eloChange >= 0 ? "+" : ""}${eloChange}) | question: ${question.eloRating} → ${newQuestionElo}`,
   );
 
-  await Promise.all([
+  // Build parallel DB updates
+  const dbUpdates = [
     Question.findByIdAndUpdate(questionId, {
       $set: { eloRating: newQuestionElo },
     }),
     User.findByIdAndUpdate(req.user._id, {
       $set: { [`skillElo.${topic}`]: newUserElo },
     }),
-  ]);
-  console.log(`[submit] DB write done — skillElo.${topic} = ${newUserElo}`);
+  ];
+
+  // Track solved question only on correct answers
+  if (isCorrect) {
+    dbUpdates.push(
+      User.findByIdAndUpdate(req.user._id, {
+        $addToSet: { solvedQuestionIds: questionId },
+      }),
+    );
+  }
+
+  await Promise.all(dbUpdates);
+  console.log(
+    `[submit] DB write done — skillElo.${topic} = ${newUserElo}${isCorrect ? ` | added ${questionId} to solvedQuestionIds` : ""}`,
+  );
 
   return sendSuccess(
     res,

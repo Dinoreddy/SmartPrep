@@ -37,27 +37,31 @@ const userSchema = new Schema(
     refreshToken: {
       type: String,
     },
-    
+
     // ==========================================
     // Feature 1: Resume Profile (The "Context")
     // ==========================================
     resumeProfile: {
       hasUploaded: { type: Boolean, default: false },
       s3Key: String, // Cloudflare/S3 URL for the PDF
-      
+
       // Extracted Metadata
-      seniority: { type: String, enum: ["Junior", "Mid", "Senior"], default: "Junior" },
+      seniority: {
+        type: String,
+        enum: ["Junior", "Mid", "Senior"],
+        default: "Junior",
+      },
       yoe: { type: Number, default: 0 },
-      topSkills: [String], // ["React", "Node.js"]
-      
+      skills: [String],
+
       // Detailed Project Context for the AI Interviewer
       projects: [
         {
           name: String,
           techStack: [String],
-          description: String
-        }
-      ]
+          description: String,
+        },
+      ],
     },
 
     // ==========================================
@@ -66,11 +70,22 @@ const userSchema = new Schema(
     // Tracks current skill level. New skills can be added dynamically.
     skillElo: {
       type: Map,
-      of: Number, 
-      default: { "General": 1000 } 
-    }
+      of: Number,
+      default: { General: 1000 },
+    },
+
+    // ==========================================
+    // Feature 3: Question Repetition Handling
+    // ==========================================
+    // Tracks correctly answered questions to serve fresh ones first.
+    solvedQuestionIds: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: "Question",
+      },
+    ],
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 // 🔒 Encrypt password before saving
@@ -97,7 +112,7 @@ userSchema.methods.generateAccessToken = function () {
     process.env.ACCESS_TOKEN_SECRET,
     {
       expiresIn: process.env.ACCESS_TOKEN_EXPIRY,
-    }
+    },
   );
 };
 
@@ -110,7 +125,7 @@ userSchema.methods.generateRefreshToken = function () {
     process.env.REFRESH_TOKEN_SECRET,
     {
       expiresIn: process.env.REFRESH_TOKEN_EXPIRY,
-    }
+    },
   );
 };
 

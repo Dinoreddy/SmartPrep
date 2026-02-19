@@ -25,3 +25,17 @@ export const REFRESH_COOKIE_OPTIONS = {
   ...COOKIE_OPTIONS,
   maxAge: parseExpiry(process.env.REFRESH_TOKEN_EXPIRY),
 };
+
+// Core skills for AI generation
+export const CORE_SKILLS = [
+  "Data Structures",
+  "Algorithms",
+  "Design Patterns",
+  "System Design",
+  "REST APIs",
+  "Web Security",
+  "Git",
+  "Agile Methodologies",
+  "Software Testing",
+  "CI/CD"
+];

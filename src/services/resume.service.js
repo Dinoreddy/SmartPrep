@@ -4,6 +4,7 @@ import Groq from "groq-sdk";
 import { User } from "../models/user.model.js";
 import { ApiError } from "../utils/ApiError.js";
 import { normalizeSkillList } from "../utils/skillNormalizer.js";
+import { CORE_SKILLS } from "../constants.js";
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -65,8 +66,9 @@ class ResumeService {
       // 2. Analyze with AI
       const analysis = await this.analyzeWithAI(rawText);
 
-      // 3. Normalize skills before persisting
-      const normalizedSkills = normalizeSkillList(analysis.topSkills);
+      // 3. Normalize resume skills and merge with CORE_SKILLS (deduplicated)
+      const resumeSkills = normalizeSkillList(analysis.skills);
+      const allSkills = [...new Set([...resumeSkills, ...CORE_SKILLS])];
 
       // 4. Update User Profile in DB
       const updatedUser = await User.findByIdAndUpdate(
@@ -76,10 +78,10 @@ class ResumeService {
             "resumeProfile.hasUploaded": true,
             "resumeProfile.seniority": analysis.seniority,
             "resumeProfile.yoe": analysis.yoe,
-            "resumeProfile.topSkills": normalizedSkills,
+            "resumeProfile.skills": allSkills,
             "resumeProfile.projects": analysis.projects,
             "resumeProfile.rawAnalysis": analysis,
-            ...this.initializeSkillElo(normalizedSkills),
+            ...this.initializeSkillElo(allSkills),
           },
         },
         { new: true },
@@ -115,7 +117,7 @@ Return ONLY a valid JSON object with this exact structure. No markdown, no code 
 {
   "seniority": "Junior" | "Mid" | "Senior",
   "yoe": <number>,
-  "topSkills": [<string>, ...],
+  "skills": [<string>, ...],
   "projects": [
     {
       "name": "<project name>",
@@ -125,7 +127,7 @@ Return ONLY a valid JSON object with this exact structure. No markdown, no code 
   ]
 }
 
-RULES FOR topSkills:
+RULES FOR skills:
 - List at most 10 technical skills.
 - Use clean, canonical names with NO dots (e.g. "React", "NodeJS", "TypeScript", "ExpressJS").
 - Do NOT include soft skills (e.g. communication, teamwork).
