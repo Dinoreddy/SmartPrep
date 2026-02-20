@@ -59,7 +59,13 @@ const userSchema = new Schema(
         {
           name: String,
           techStack: [String],
-          description: String,
+          description: String, // Keep this for simple UI cards
+          // NEW: Deep context for the AI Interviewer
+          context: {
+            architecture: { type: String, default: "" },
+            keyFeatures: [{ type: String }],
+            metrics: { type: String, default: "" },
+          },
         },
       ],
     },
