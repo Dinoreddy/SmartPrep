@@ -1,0 +1,1193 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SmartPrep — Live Interview Tester</title>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <style>
+      /* ── Reset & base ─────────────────────────────────────────────────── */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      :root {
+        --bg: #0f1117;
+        --surface: #1a1d27;
+        --surface2: #22263a;
+        --border: #2e3249;
+        --accent: #7c6af7;
+        --accent2: #5e50cc;
+        --user-clr: #60a5fa;
+        --ai-clr: #a78bfa;
+        --success: #34d399;
+        --danger: #f87171;
+        --warn: #fbbf24;
+        --text: #e2e8f0;
+        --muted: #8892b0;
+        --radius: 12px;
+        --glow: 0 0 20px rgba(124, 106, 247, 0.25);
+      }
+
+      body {
+        font-family: "Inter", system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 32px 16px 64px;
+        gap: 24px;
+      }
+
+      /* ── Header ──────────────────────────────────────────────────────── */
+      header {
+        text-align: center;
+      }
+      header h1 {
+        font-size: 1.8rem;
+        font-weight: 700;
+        background: linear-gradient(
+          135deg,
+          #7c6af7 0%,
+          #a78bfa 60%,
+          #60a5fa 100%
+        );
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+      header p {
+        color: var(--muted);
+        margin-top: 4px;
+        font-size: 0.875rem;
+      }
+
+      /* ── Card ─────────────────────────────────────────────────────────── */
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 24px;
+        width: 100%;
+        max-width: 780px;
+        box-shadow: var(--glow);
+      }
+      .card h2 {
+        font-size: 1rem;
+        font-weight: 600;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 16px;
+      }
+
+      /* ── Form fields ─────────────────────────────────────────────────── */
+      .row {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        flex: 1;
+        min-width: 180px;
+      }
+      label {
+        font-size: 0.8rem;
+        color: var(--muted);
+        font-weight: 500;
+      }
+      input {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px 14px;
+        color: var(--text);
+        font-size: 0.9rem;
+        outline: none;
+        transition: border-color 0.2s;
+      }
+      input:focus {
+        border-color: var(--accent);
+      }
+      input::placeholder {
+        color: #4a5280;
+      }
+
+      /* ── Buttons ─────────────────────────────────────────────────────── */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 20px;
+        border-radius: 8px;
+        border: none;
+        font-size: 0.875rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      .btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+      .btn-primary {
+        background: var(--accent);
+        color: #fff;
+      }
+      .btn-primary:hover:not(:disabled) {
+        background: var(--accent2);
+        transform: translateY(-1px);
+      }
+      .btn-danger {
+        background: #3f1f1f;
+        color: var(--danger);
+        border: 1px solid #5a2424;
+      }
+      .btn-danger:hover:not(:disabled) {
+        background: #5a2424;
+        transform: translateY(-1px);
+      }
+      .btn-success {
+        background: #0d3326;
+        color: var(--success);
+        border: 1px solid #194d38;
+      }
+      .btn-success:hover:not(:disabled) {
+        background: #194d38;
+        transform: translateY(-1px);
+      }
+      .btn-neutral {
+        background: var(--surface2);
+        color: var(--text);
+        border: 1px solid var(--border);
+      }
+      .btn-neutral:hover:not(:disabled) {
+        background: var(--border);
+        transform: translateY(-1px);
+      }
+
+      .actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 16px;
+      }
+
+      /* ── Status badge ────────────────────────────────────────────────── */
+      #status-bar {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px 16px;
+        font-size: 0.85rem;
+        color: var(--muted);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        max-width: 780px;
+      }
+      #status-bar .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--muted);
+        flex-shrink: 0;
+        transition: background 0.3s;
+      }
+      #status-bar.connected .dot {
+        background: var(--success);
+        box-shadow: 0 0 6px var(--success);
+      }
+      #status-bar.recording .dot {
+        background: var(--danger);
+        box-shadow: 0 0 6px var(--danger);
+        animation: blink 1s infinite;
+      }
+      #status-bar.processing .dot {
+        background: var(--warn);
+        box-shadow: 0 0 6px var(--warn);
+      }
+      @keyframes blink {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.3;
+        }
+      }
+
+      /* ── Visualiser ──────────────────────────────────────────────────── */
+      canvas#visualiser {
+        width: 100%;
+        height: 64px;
+        border-radius: 8px;
+        background: var(--surface2);
+        display: block;
+        margin-top: 12px;
+      }
+
+      /* ── Transcript ──────────────────────────────────────────────────── */
+      #transcript {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        max-height: 380px;
+        overflow-y: auto;
+        padding-right: 4px;
+      }
+      #transcript::-webkit-scrollbar {
+        width: 4px;
+      }
+      #transcript::-webkit-scrollbar-thumb {
+        background: var(--border);
+        border-radius: 4px;
+      }
+
+      .msg {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        max-width: 85%;
+        animation: fadeIn 0.3s ease;
+      }
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(6px);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+      .msg.user {
+        align-self: flex-end;
+        align-items: flex-end;
+      }
+      .msg.ai {
+        align-self: flex-start;
+      }
+      .msg .label {
+        font-size: 0.7rem;
+        color: var(--muted);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .msg.user .label {
+        color: var(--user-clr);
+      }
+      .msg.ai .label {
+        color: var(--ai-clr);
+      }
+      .msg .bubble {
+        padding: 10px 14px;
+        border-radius: 12px;
+        font-size: 0.9rem;
+        line-height: 1.5;
+      }
+      .msg.user .bubble {
+        background: #1e2a4a;
+        border: 1px solid #2e3f6b;
+        color: var(--user-clr);
+        border-bottom-right-radius: 2px;
+      }
+      .msg.ai .bubble {
+        background: #231f3d;
+        border: 1px solid #3c3070;
+        color: var(--ai-clr);
+        border-bottom-left-radius: 2px;
+      }
+
+      /* Blinking cursor shown while AI text is streaming in */
+      .streaming-cursor {
+        display: inline-block;
+        width: 2px;
+        height: 1em;
+        background: var(--ai-clr);
+        margin-left: 2px;
+        vertical-align: text-bottom;
+        border-radius: 1px;
+        animation: blink 0.8s step-start infinite;
+      }
+
+      /* ── Log ─────────────────────────────────────────────────────────── */
+      .log-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+      .log-header h2 {
+        margin-bottom: 0;
+      }
+      #btn-clear-log {
+        font-size: 0.72rem;
+        padding: 4px 10px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--surface2);
+        color: var(--muted);
+        cursor: pointer;
+        transition: background 0.15s;
+      }
+      #btn-clear-log:hover {
+        background: var(--border);
+        color: var(--text);
+      }
+      #log {
+        background: #0a0c12;
+        border-radius: 8px;
+        padding: 12px 14px;
+        font-family: "Fira Code", "Cascadia Code", monospace;
+        font-size: 0.78rem;
+        max-height: 340px;
+        overflow-y: auto;
+        color: #64748b;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      #log::-webkit-scrollbar {
+        width: 4px;
+      }
+      #log::-webkit-scrollbar-thumb {
+        background: #1e2a3a;
+        border-radius: 4px;
+      }
+      .log-info {
+        color: #60a5fa;
+      }
+      .log-ok {
+        color: #34d399;
+      }
+      .log-warn {
+        color: #fbbf24;
+      }
+      .log-error {
+        color: #f87171;
+      }
+      .log-step {
+        color: #c084fc;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+      .log-sep {
+        color: #2e3249;
+        user-select: none;
+      }
+
+      /* ── Info chips ──────────────────────────────────────────────────── */
+      #session-info {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 12px;
+      }
+      .chip {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 4px 10px;
+        font-size: 0.75rem;
+        color: var(--muted);
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .chip span {
+        color: var(--text);
+        font-weight: 500;
+      }
+
+      /* ── Waveform animation on AI speaking ──────────────────────────── */
+      .ai-speaking-indicator {
+        display: flex;
+        align-items: center;
+        gap: 3px;
+        height: 18px;
+      }
+      .ai-speaking-indicator .bar {
+        width: 3px;
+        border-radius: 2px;
+        background: var(--ai-clr);
+        animation: wave 0.9s ease-in-out infinite;
+      }
+      .ai-speaking-indicator .bar:nth-child(2) {
+        animation-delay: 0.15s;
+      }
+      .ai-speaking-indicator .bar:nth-child(3) {
+        animation-delay: 0.3s;
+      }
+      .ai-speaking-indicator .bar:nth-child(4) {
+        animation-delay: 0.45s;
+      }
+      @keyframes wave {
+        0%,
+        100% {
+          height: 4px;
+        }
+        50% {
+          height: 16px;
+        }
+      }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <header>
+      <h1>⚡ SmartPrep Live Interview Tester</h1>
+      <p>Step-by-step test harness for the STT → LLM → TTS pipeline</p>
+    </header>
+
+    <!-- Status bar -->
+    <div id="status-bar">
+      <div class="dot"></div>
+      <span id="status-text">Idle — configure credentials and click Login</span>
+    </div>
+
+    <!-- ── Step 1: Credentials ─────────────────────────────────────────── -->
+    <div class="card">
+      <h2>① Credentials</h2>
+      <div class="row">
+        <div class="field">
+          <label for="base-url">Backend URL</label>
+          <input
+            id="base-url"
+            value="http://localhost:5000"
+            placeholder="http://localhost:5000"
+          />
+        </div>
+        <div class="field">
+          <label for="email">Email</label>
+          <input id="email" type="email" placeholder="user@example.com" />
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input id="password" type="password" placeholder="••••••••" />
+        </div>
+      </div>
+      <div class="actions">
+        <button id="btn-login" class="btn btn-primary" onclick="doLogin()">
+          🔑 Login
+        </button>
+        <button
+          id="btn-start"
+          class="btn btn-success"
+          onclick="startSession()"
+          disabled
+        >
+          🚀 Start Interview Session
+        </button>
+      </div>
+
+      <div id="session-info"></div>
+    </div>
+
+    <!-- ── Step 2: Audio Controls ──────────────────────────────────────── -->
+    <div class="card">
+      <h2>② Audio Controls</h2>
+      <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 12px">
+        Click <strong>Start Recording</strong> to begin speaking. When done,
+        click <strong>Stop &amp; Send</strong> — the audio is transcribed,
+        processed by the AI, and played back to you.
+      </p>
+      <div class="actions">
+        <button
+          id="btn-record"
+          class="btn btn-danger"
+          onclick="startRecording()"
+          disabled
+        >
+          🎙 Start Recording
+        </button>
+        <button
+          id="btn-stop"
+          class="btn btn-neutral"
+          onclick="stopRecording()"
+          disabled
+        >
+          ⏹ Stop &amp; Send
+        </button>
+        <button
+          id="btn-replay"
+          class="btn btn-neutral"
+          onclick="replayLastAudio()"
+          disabled
+        >
+          🔊 Replay Last AI Audio
+        </button>
+      </div>
+      <canvas id="visualiser"></canvas>
+    </div>
+
+    <!-- ── Step 3: Transcript ──────────────────────────────────────────── -->
+    <div class="card">
+      <h2>③ Conversation Transcript</h2>
+      <div id="transcript">
+        <p
+          style="
+            color: var(--muted);
+            font-size: 0.85rem;
+            text-align: center;
+            padding: 24px 0;
+          "
+        >
+          Transcript will appear here once the session starts.
+        </p>
+      </div>
+    </div>
+
+    <!-- ── Log ────────────────────────────────────────────────────────── -->
+    <div class="card">
+      <div class="log-header">
+        <h2>④ Pipeline Event Log</h2>
+        <button id="btn-clear-log" onclick="clearLog()">Clear</button>
+      </div>
+      <div id="log">
+        <span>Waiting for events…</span>
+      </div>
+    </div>
+
+    <script>
+      // ── State ─────────────────────────────────────────────────────────────
+      let accessToken = null;
+      let interviewId = null;
+      let socket = null;
+      let mediaRecorder = null;
+      let audioChunks = [];
+      let lastAudioBuffer = null; // keep last AI audio for replay
+
+      // AudioContext for visualiser + playback
+      let audioCtx = null;
+      let analyser = null;
+      let animFrameId = null;
+      let mediaStream = null;
+
+      // ── Sequential audio queue ───────────────────────────────────────────
+      // Each ai_audio_chunk is decoded then chained so chunks play one-after-another.
+      // _audioQueue is a Promise that resolves when the current chunk finishes.
+      let _audioQueue = Promise.resolve();
+
+      const baseUrl = () =>
+        document.getElementById("base-url").value.replace(/\/$/, "");
+
+      // ── Logging ───────────────────────────────────────────────────────────
+      const logEl = document.getElementById("log");
+
+      function log(msg, type = "info") {
+        const span = document.createElement("span");
+        span.className = `log-${type}`;
+        const ts = new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          fractionalSecondDigits: 2,
+        });
+        span.textContent = `[${ts}] ${msg}`;
+        if (
+          logEl.children.length === 1 &&
+          logEl.children[0].textContent === "Waiting for events…"
+        ) {
+          logEl.innerHTML = "";
+        }
+        logEl.appendChild(span);
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      function logStep(label) {
+        // Separator + bold step header
+        const sep = document.createElement("span");
+        sep.className = "log-sep";
+        sep.textContent = "─".repeat(52);
+        const s = document.createElement("span");
+        s.className = "log-step";
+        const ts = new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          fractionalSecondDigits: 2,
+        });
+        s.textContent = `[${ts}] ▶ ${label}`;
+        if (
+          logEl.children.length === 1 &&
+          logEl.children[0].textContent === "Waiting for events…"
+        ) {
+          logEl.innerHTML = "";
+        }
+        logEl.appendChild(sep);
+        logEl.appendChild(s);
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      function clearLog() {
+        logEl.innerHTML = "<span>Log cleared.</span>";
+      }
+
+      // Per-pipeline timing
+      let _pipelineStart = 0;
+
+      // ── Status bar ────────────────────────────────────────────────────────
+      const statusBar = document.getElementById("status-bar");
+      const statusText = document.getElementById("status-text");
+      function setStatus(msg, state = "") {
+        statusText.textContent = msg;
+        statusBar.className = state;
+      }
+
+      // ── Session info chips ────────────────────────────────────────────────
+      function renderSessionInfo() {
+        const el = document.getElementById("session-info");
+        el.innerHTML = `
+          <div class="chip">Token <span>${accessToken ? "✅ Obtained" : "—"}</span></div>
+          <div class="chip">Interview ID <span>${interviewId || "—"}</span></div>
+          <div class="chip">Socket <span id="chip-socket">Disconnected</span></div>
+        `;
+      }
+      renderSessionInfo();
+
+      // ── Step 1a: Login ────────────────────────────────────────────────────
+      async function doLogin() {
+        const email = document.getElementById("email").value.trim();
+        const password = document.getElementById("password").value;
+
+        if (!email || !password) {
+          log("Email and password are required.", "warn");
+          return;
+        }
+
+        logStep("AUTH — Login");
+        log(`→ POST /api/v1/auth/login  (email: ${email})`, "info");
+        const t0 = Date.now();
+        try {
+          const res = await fetch(`${baseUrl()}/api/v1/auth/login`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password }),
+          });
+          const json = await res.json();
+          log(
+            `← HTTP ${res.status} in ${Date.now() - t0}ms`,
+            res.ok ? "ok" : "error",
+          );
+
+          if (!res.ok) {
+            log(`Login failed: ${json.message || res.status}`, "error");
+            return;
+          }
+
+          accessToken = json?.data?.accessToken || json?.accessToken;
+          if (!accessToken) {
+            log("No accessToken in response — check response shape.", "error");
+            log("Full response: " + JSON.stringify(json), "warn");
+            return;
+          }
+
+          log(`✔ Access token obtained (${accessToken.length} chars).`, "ok");
+          document.getElementById("btn-start").disabled = false;
+          renderSessionInfo();
+          setStatus("Logged in — ready to start a session.", "connected");
+        } catch (err) {
+          log(`Network error: ${err.message}`, "error");
+        }
+      }
+
+      // ── Step 1b: Start session (REST) ────────────────────────────────────
+      async function startSession() {
+        if (!accessToken) {
+          log("Login first.", "warn");
+          return;
+        }
+
+        logStep("SESSION INIT — POST /api/v1/interview/start");
+        log("→ Sending request with Bearer token…", "info");
+        const t0 = Date.now();
+        try {
+          const res = await fetch(`${baseUrl()}/api/v1/interview/start`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${accessToken}`,
+            },
+          });
+          const json = await res.json();
+          log(
+            `← HTTP ${res.status} in ${Date.now() - t0}ms`,
+            res.ok ? "ok" : "error",
+          );
+
+          if (!res.ok) {
+            log(`Start session failed: ${json.message || res.status}`, "error");
+            return;
+          }
+
+          interviewId = json?.data?.interviewId;
+          const initialMessage = json?.data?.initialMessage;
+
+          if (!interviewId) {
+            log("No interviewId in response: " + JSON.stringify(json), "error");
+            return;
+          }
+
+          log(`✔ interviewId: ${interviewId}`, "ok");
+          log(
+            `✔ Initial AI message: "${(initialMessage || "").slice(0, 80)}…"`,
+            "ok",
+          );
+          renderSessionInfo();
+
+          if (initialMessage) appendTranscript("assistant", initialMessage);
+          connectSocket();
+        } catch (err) {
+          log(`Network error: ${err.message}`, "error");
+        }
+      }
+
+      // ── Step 2: Socket.io ─────────────────────────────────────────────────
+      function connectSocket() {
+        const url = baseUrl();
+        logStep("SOCKET — Connecting");
+        log(
+          `→ io("${url}", { auth: { token }, transports: ["websocket"] })`,
+          "info",
+        );
+
+        socket = io(url, {
+          auth: { token: accessToken },
+          transports: ["websocket"],
+        });
+
+        socket.on("connect", () => {
+          log(`✔ Socket connected  id=${socket.id}`, "ok");
+          document.getElementById("chip-socket").textContent = "Connected";
+          setStatus("Socket connected — joining interview room…", "connected");
+          log(`→ emit join_interview("${interviewId}")`, "info");
+          socket.emit("join_interview", interviewId);
+          log(`✔ Joined room — ready to record.`, "ok");
+          document.getElementById("btn-record").disabled = false;
+          setStatus("Ready — click Start Recording to speak.", "connected");
+        });
+
+        socket.on("connect_error", (err) => {
+          log(`✘ Socket connect error: ${err.message}`, "error");
+          log(
+            `  Tip: check CORS_ORIGIN on server and that JWT is valid.`,
+            "warn",
+          );
+          setStatus("Socket connection failed.", "");
+        });
+
+        socket.on("disconnect", (reason) => {
+          log(`⚠ Socket disconnected: ${reason}`, "warn");
+          document.getElementById("chip-socket").textContent = "Disconnected";
+          setStatus("Socket disconnected.", "");
+          document.getElementById("btn-record").disabled = true;
+          document.getElementById("btn-stop").disabled = true;
+        });
+
+        // ── Pipeline events ──────────────────────────────────────────────────
+        socket.on("transcript_update", ({ role, content }) => {
+          logStep(`PIPELINE Step 2 — transcript_update [${role}]`);
+          log(
+            `"${content.slice(0, 100)}${content.length > 100 ? "…" : ""}"`,
+            "info",
+          );
+          appendTranscript(role, content);
+        });
+
+        // Streaming AI transcript bubble — accumulates text from each sentence chunk
+        let _aiChunkCount = 0;
+        let _aiText = ""; // full AI response for this turn
+        let _aiBubble = null; // live <div> being updated
+
+        socket.on("ai_audio_chunk", ({ audio, text }) => {
+          _aiChunkCount++;
+          const bytes = audio ? Object.keys(audio).length : 0;
+          logStep(`PIPELINE Step 5 — ai_audio_chunk #${_aiChunkCount}`);
+          log(
+            `  text : "${(text || "").slice(0, 70)}${(text || "").length > 70 ? "…" : ""}"`,
+            "info",
+          );
+          log(
+            `  bytes: ${bytes}  |  elapsed: ${Date.now() - _pipelineStart}ms from send`,
+            "info",
+          );
+
+          // Build / update the streaming transcript bubble
+          if (text) {
+            _aiText += (_aiText ? " " : "") + text.trim();
+            if (!_aiBubble) {
+              // First chunk — create a new AI message row with a streaming bubble
+              _aiBubble = createStreamingAiBubble();
+            }
+            // Update bubble text (keep blinking cursor while streaming)
+            updateStreamingBubble(_aiBubble, _aiText, /* finished */ false);
+          }
+
+          playAudioBuffer(audio, text);
+        });
+
+        socket.on("ai_turn_complete", () => {
+          logStep("PIPELINE COMPLETE — ai_turn_complete");
+          log(`✔ Full round-trip took ${Date.now() - _pipelineStart}ms.`, "ok");
+          log(`  Chunk count this turn: ${_aiChunkCount}`, "info");
+
+          // Finalise the streaming bubble (remove cursor, lock text)
+          if (_aiBubble) {
+            updateStreamingBubble(_aiBubble, _aiText, /* finished */ true);
+          }
+          _aiChunkCount = 0;
+          _aiText = "";
+          _aiBubble = null;
+
+          setStatus("AI done — ready for your next response.", "connected");
+          hideAiSpeaking();
+          document.getElementById("btn-record").disabled = false;
+          document.getElementById("btn-stop").disabled = true;
+        });
+
+        socket.on("error", ({ message }) => {
+          log(`✘ Server error: ${message}`, "error");
+        });
+      }
+
+      // ── Audio recording ───────────────────────────────────────────────────
+      async function startRecording() {
+        if (!socket?.connected) {
+          log("✘ Socket not connected.", "error");
+          return;
+        }
+
+        logStep("RECORDING — getUserMedia");
+        try {
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+          });
+          log("✔ Mic access granted.", "ok");
+          setupVisualiser(mediaStream);
+
+          mediaRecorder = new MediaRecorder(mediaStream, {
+            mimeType: "audio/webm",
+          });
+          audioChunks = [];
+
+          let chunkIdx = 0;
+          mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) {
+              audioChunks.push(e.data);
+              chunkIdx++;
+              if (chunkIdx % 10 === 0)
+                log(`  … ${chunkIdx} audio chunks collected so far`, "info");
+            }
+          };
+
+          mediaRecorder.start(100);
+          log(
+            "MediaRecorder started  mimeType=audio/webm  timeslice=100ms",
+            "info",
+          );
+          document.getElementById("btn-record").disabled = true;
+          document.getElementById("btn-stop").disabled = false;
+          setStatus("Recording… speak now.", "recording");
+        } catch (err) {
+          log(`✘ Mic access error: ${err.message}`, "error");
+          log("  Tip: allow microphone in browser settings.", "warn");
+        }
+      }
+
+      async function stopRecording() {
+        if (!mediaRecorder || mediaRecorder.state === "inactive") return;
+
+        logStep("PIPELINE Step 0 — Stop recording & send audio");
+        mediaRecorder.stop();
+        mediaStream?.getTracks().forEach((t) => t.stop());
+        stopVisualiser();
+        document.getElementById("btn-stop").disabled = true;
+        document.getElementById("btn-record").disabled = true;
+        setStatus("Processing — transcribing your audio…", "processing");
+
+        log(
+          "MediaRecorder stopped — waiting for final ondataavailable…",
+          "info",
+        );
+        await new Promise((resolve) => setTimeout(resolve, 150));
+
+        const blob = new Blob(audioChunks, { type: "audio/webm" });
+        const arrayBuffer = await blob.arrayBuffer();
+        log(
+          `Blob assembled: ${audioChunks.length} chunks → ${(blob.size / 1024).toFixed(1)} KB`,
+          "info",
+        );
+
+        logStep("PIPELINE Step 1 — emit candidate_audio_chunk → [server: STT]");
+        _pipelineStart = Date.now();
+        socket.emit("candidate_audio_chunk", {
+          interviewId,
+          audioBuffer: arrayBuffer,
+        });
+        log(
+          `✔ Emitted to server at t=0ms — waiting for transcript_update…`,
+          "ok",
+        );
+        setStatus(
+          "Audio sent — server transcribing via Whisper…",
+          "processing",
+        );
+      }
+
+      // ── Audio playback (PCM16 → AudioContext) ─────────────────────────────
+      // Deepgram TTS returns linear16 PCM wrapped in a WAV header.
+      // Chunks arrive per-sentence and MUST play sequentially — we chain
+      // each one onto _audioQueue so they never overlap.
+      function playAudioBuffer(rawData, _text) {
+        audioCtx =
+          audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+
+        // rawData arrives as an object {0:n, 1:n, …} or ArrayBuffer
+        let bytes;
+        if (rawData instanceof ArrayBuffer) {
+          bytes = new Uint8Array(rawData);
+        } else {
+          bytes = new Uint8Array(Object.values(rawData));
+        }
+
+        lastAudioBuffer = bytes;
+        document.getElementById("btn-replay").disabled = false;
+
+        const wav = pcm16ToWav(bytes, 16000, 1);
+        log(
+          `  PCM16→WAV: ${bytes.byteLength}B PCM → ${wav.byteLength}B WAV — queued for sequential playback`,
+          "info",
+        );
+
+        // Decode now (fast, CPU-side), then chain onto the queue so playback
+        // starts only after the previous sentence finishes.
+        const decodePromise = audioCtx
+          .decodeAudioData(wav.buffer.slice(0))
+          .then(
+            (decoded) => decoded,
+            (err) => {
+              log(`✘ Audio decode error: ${err}`, "error");
+              log("  Tip: PCM16 data may be malformed or zero-length.", "warn");
+              return null;
+            },
+          );
+
+        showAiSpeaking();
+
+        // Chain: wait for previous chunk to finish, then play this one
+        _audioQueue = _audioQueue
+          .then(() => decodePromise)
+          .then((decoded) => {
+            if (!decoded) return; // decode failed — skip silently
+            return new Promise((resolve) => {
+              log(
+                `  ✔ decode OK  dur=${decoded.duration.toFixed(2)}s  sr=${decoded.sampleRate}Hz — starting playback`,
+                "ok",
+              );
+              const src = audioCtx.createBufferSource();
+              src.buffer = decoded;
+              src.connect(audioCtx.destination);
+              src.onended = () => {
+                log("  ✔ Chunk playback finished.", "ok");
+                resolve();
+              };
+              src.start();
+              log("  ▶ Playback started.", "info");
+            });
+          });
+      }
+
+      function replayLastAudio() {
+        if (!lastAudioBuffer) return;
+        audioCtx =
+          audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+        // Replay doesn't go through the queue — it's an explicit user action
+        const wav = pcm16ToWav(lastAudioBuffer, 16000, 1);
+        log("🔊 Replaying last AI audio chunk…", "info");
+        showAiSpeaking();
+        audioCtx.decodeAudioData(wav.buffer.slice(0), (decoded) => {
+          const src = audioCtx.createBufferSource();
+          src.buffer = decoded;
+          src.connect(audioCtx.destination);
+          src.onended = () => {
+            hideAiSpeaking();
+            log("  ✔ Replay finished.", "ok");
+          };
+          src.start();
+        });
+      }
+
+      // Build minimal WAV header around raw PCM16 LE bytes
+      function pcm16ToWav(pcmBytes, sampleRate, numChannels) {
+        const dataLen = pcmBytes.byteLength;
+        const buffer = new ArrayBuffer(44 + dataLen);
+        const view = new DataView(buffer);
+        const writeStr = (off, str) => {
+          for (let i = 0; i < str.length; i++)
+            view.setUint8(off + i, str.charCodeAt(i));
+        };
+
+        writeStr(0, "RIFF");
+        view.setUint32(4, 36 + dataLen, true);
+        writeStr(8, "WAVE");
+        writeStr(12, "fmt ");
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true); // PCM
+        view.setUint16(22, numChannels, true);
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, sampleRate * numChannels * 2, true);
+        view.setUint16(32, numChannels * 2, true);
+        view.setUint16(34, 16, true);
+        writeStr(36, "data");
+        view.setUint32(40, dataLen, true);
+        new Uint8Array(buffer, 44).set(pcmBytes);
+        return new DataView(buffer);
+      }
+
+      // ── Transcript helpers ────────────────────────────────────────────────
+      let transcriptInitialised = false;
+      function appendTranscript(role, content) {
+        const container = document.getElementById("transcript");
+        if (!transcriptInitialised) {
+          container.innerHTML = "";
+          transcriptInitialised = true;
+        }
+
+        const isUser = role === "user";
+        const label = isUser ? "🧑 You" : "🤖 AI Interviewer";
+
+        const div = document.createElement("div");
+        div.className = `msg ${isUser ? "user" : "ai"}`;
+        div.innerHTML = `<div class="label">${label}</div><div class="bubble">${escHtml(content)}</div>`;
+        container.appendChild(div);
+        container.scrollTop = container.scrollHeight;
+      }
+
+      // Creates an empty AI bubble in the transcript for streaming text.
+      // Returns the inner bubble <div> so callers can update its content.
+      function createStreamingAiBubble() {
+        const container = document.getElementById("transcript");
+        if (!transcriptInitialised) {
+          container.innerHTML = "";
+          transcriptInitialised = true;
+        }
+        const row = document.createElement("div");
+        row.className = "msg ai";
+        const bubble = document.createElement("div");
+        bubble.className = "bubble";
+        row.innerHTML = `<div class="label">🤖 AI Interviewer</div>`;
+        row.appendChild(bubble);
+        container.appendChild(row);
+        container.scrollTop = container.scrollHeight;
+        return bubble;
+      }
+
+      // Updates the streaming bubble text. While streaming, appends a blinking
+      // cursor; removes it and freezes the content when finished=true.
+      function updateStreamingBubble(bubble, text, finished) {
+        if (finished) {
+          bubble.innerHTML = escHtml(text);
+        } else {
+          bubble.innerHTML =
+            escHtml(text) + '<span class="streaming-cursor"></span>';
+        }
+        const container = document.getElementById("transcript");
+        container.scrollTop = container.scrollHeight;
+      }
+
+      function escHtml(str) {
+        return str
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+      }
+
+      // ── AI speaking indicator ─────────────────────────────────────────────
+      // The streaming text bubble now serves as the visual "AI is speaking"
+      // indicator, so these are no-ops. Keeping them to avoid call-site errors.
+      function showAiSpeaking() {}
+      function hideAiSpeaking() {}
+
+      // ── Visualiser ────────────────────────────────────────────────────────
+      function setupVisualiser(stream) {
+        audioCtx =
+          audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+        const canvas = document.getElementById("visualiser");
+        const ctx = canvas.getContext("2d");
+        const source = audioCtx.createMediaStreamSource(stream);
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        function draw() {
+          animFrameId = requestAnimationFrame(draw);
+          analyser.getByteFrequencyData(data);
+
+          const w = canvas.offsetWidth;
+          canvas.width = w;
+          canvas.height = 64;
+          ctx.clearRect(0, 0, w, 64);
+
+          const barW = (w / data.length) * 2.5;
+          let x = 0;
+          for (let i = 0; i < data.length; i++) {
+            const barH = (data[i] / 255) * 60;
+            const grad = ctx.createLinearGradient(0, 64, 0, 0);
+            grad.addColorStop(0, "#7c6af7");
+            grad.addColorStop(1, "#60a5fa");
+            ctx.fillStyle = grad;
+            ctx.fillRect(x, 64 - barH, barW - 1, barH);
+            x += barW + 1;
+          }
+        }
+        draw();
+      }
+
+      function stopVisualiser() {
+        if (animFrameId) cancelAnimationFrame(animFrameId);
+        const canvas = document.getElementById("visualiser");
+        const ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+
+      // ── Keyboard shortcut ─────────────────────────────────────────────────
+      // Hold Space to record, release to stop & send
+      let spaceHeld = false;
+      document.addEventListener("keydown", (e) => {
+        if (
+          e.code === "Space" &&
+          !e.repeat &&
+          !spaceHeld &&
+          !document.getElementById("btn-record").disabled
+        ) {
+          e.preventDefault();
+          spaceHeld = true;
+          startRecording();
+        }
+      });
+      document.addEventListener("keyup", (e) => {
+        if (e.code === "Space" && spaceHeld) {
+          spaceHeld = false;
+          if (!document.getElementById("btn-stop").disabled) stopRecording();
+        }
+      });
+    </script>
+  </body>
+</html>
