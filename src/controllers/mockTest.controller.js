@@ -26,6 +26,12 @@ export const startTest = asyncHandler(async (req, res) => {
   return sendSuccess(res, plain, "Mock test started successfully", 201);
 });
 
+export const getTestById = asyncHandler(async (req, res) => {
+  const { testId } = req.params;
+  const result = await mockTestService.getTestById(testId, req.user._id);
+  return sendSuccess(res, result, "Test fetched successfully");
+});
+
 export const submitTest = asyncHandler(async (req, res) => {
   const { testId } = req.params;
   const { answers } = req.body;

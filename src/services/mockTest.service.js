@@ -122,6 +122,104 @@ class MockTestService {
    * @param {ObjectId} userId      - Authenticated user's _id
    * @param {Object}   userAnswers - { [questionId]: selectedOptionIndex }
    */
+  /**
+   * Fetches a single MockTest by ID and returns a fully enriched response:
+   *   - top-level metrics (score, percentage, status, duration)
+   *   - skills breakdown (per-topic correct/total counts)
+   *   - per-question detail (text, options, user answer, correct answer, explanation)
+   *
+   * @param {string}   testId  - MockTest _id
+   * @param {ObjectId} userId  - Authenticated user's _id (ownership check)
+   */
+  async getTestById(testId, userId) {
+    const test = await MockTest.findById(testId).lean();
+    if (!test) throw new ApiError(404, "Test not found");
+    if (test.user.toString() !== userId.toString())
+      throw new ApiError(403, "Forbidden — this test belongs to another user");
+
+    // Fetch live explanations + correctOptionIndex from Question collection
+    const questionIds = test.questions.map((q) => q.questionId);
+    const liveQuestions = await Question.find(
+      { _id: { $in: questionIds } },
+      { _id: 1, explanation: 1, correctOptionIndex: 1 },
+    ).lean();
+
+    const liveMap = new Map(liveQuestions.map((q) => [q._id.toString(), q]));
+
+    // Answers map: questionId string → selected option index
+    const answersMap =
+      test.answers instanceof Map
+        ? test.answers
+        : new Map(Object.entries(test.answers ?? {}));
+
+    // Build per-question detail and accumulate skills breakdown
+    const skillsMap = {}; // { topic: { correct, total } }
+    const questions = test.questions.map((q) => {
+      const qIdStr = q.questionId.toString();
+      const live = liveMap.get(qIdStr) ?? {};
+
+      const correctIndex =
+        q.correctOptionIndex ?? live.correctOptionIndex ?? null;
+      const selectedIndex = answersMap.has(qIdStr)
+        ? Number(answersMap.get(qIdStr))
+        : null;
+      const isCorrect =
+        selectedIndex !== null && selectedIndex === correctIndex;
+      const isAnswered = selectedIndex !== null;
+
+      // Skills breakdown accumulation
+      if (!skillsMap[q.topic]) skillsMap[q.topic] = { correct: 0, total: 0 };
+      skillsMap[q.topic].total++;
+      if (isCorrect) skillsMap[q.topic].correct++;
+
+      return {
+        questionId: q.questionId,
+        text: q.text,
+        topic: q.topic,
+        difficulty: q.difficulty,
+        options: q.options,
+        correctOptionIndex: correctIndex,
+        selectedOptionIndex: selectedIndex,
+        isAnswered,
+        isCorrect,
+        explanation: live.explanation ?? "",
+      };
+    });
+
+    const skillsCovered = Object.entries(skillsMap).map(([skill, counts]) => ({
+      skill,
+      correct: counts.correct,
+      total: counts.total,
+      accuracy:
+        counts.total > 0
+          ? parseFloat(((counts.correct / counts.total) * 100).toFixed(1))
+          : 0,
+    }));
+
+    // Duration in seconds (null if test not yet completed)
+    const durationSeconds =
+      test.startedAt && test.completedAt
+        ? Math.round(
+            (new Date(test.completedAt) - new Date(test.startedAt)) / 1000,
+          )
+        : null;
+
+    return {
+      testId: test._id,
+      status: test.status,
+      startedAt: test.startedAt,
+      completedAt: test.completedAt ?? null,
+      durationSeconds,
+      metrics: {
+        score: test.score,
+        totalQuestions: test.totalQuestions,
+        percentage: test.percentage,
+      },
+      skillsCovered,
+      questions,
+    };
+  }
+
   async submitTest(testId, userId, userAnswers) {
     const test = await MockTest.findById(testId);
     if (!test) throw new ApiError(404, "Test not found");

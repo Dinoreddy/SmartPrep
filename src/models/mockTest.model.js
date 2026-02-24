@@ -12,6 +12,7 @@ const mockTestSchema = new Schema(
     // historical data mutation if question data changes later
     questions: [
       {
+        _id: false,
         questionId: {
           type: Schema.Types.ObjectId,
           ref: "Question",
