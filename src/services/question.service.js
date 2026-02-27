@@ -5,6 +5,17 @@ import { generateQuestionsWithGroq } from "../utils/aiHelper.js";
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
+const CLIENT_FIELDS = {
+  _id: 1,
+  text: 1,
+  options: 1,
+  correctOptionIndex: 1,
+  explanation: 1,
+  difficulty: 1,
+  eloRating: 1,
+  topics: 1,
+};
+
 class QuestionService {
   /**
    * Get practice questions with adaptive Elo matchmaking and repetition handling.
@@ -33,6 +44,7 @@ class QuestionService {
     const freshQuestions = await Question.aggregate([
       { $match: { ...eloFilter, _id: { $nin: solvedIds } } },
       { $sample: { size: Number(limit) } },
+      { $project: CLIENT_FIELDS },
     ]);
 
     const freshCount = freshQuestions.length;
@@ -45,6 +57,7 @@ class QuestionService {
       recycledQuestions = await Question.aggregate([
         { $match: { ...eloFilter, _id: { $nin: freshIds } } },
         { $sample: { size: recycleNeeded } },
+        { $project: CLIENT_FIELDS },
       ]);
     }
 
@@ -87,7 +100,84 @@ class QuestionService {
       await Question.insertMany(questionsToSave);
     }
 
-    return [...combined, ...questionsToSave];
+    // Strip server-only fields from freshly generated questions before returning
+    const sanitizedNew = questionsToSave.map(
+      ({
+        text,
+        options,
+        correctOptionIndex,
+        explanation,
+        difficulty,
+        eloRating,
+        topics,
+        _id,
+      }) => ({
+        _id,
+        text,
+        options,
+        correctOptionIndex,
+        explanation,
+        difficulty,
+        eloRating,
+        topics,
+      }),
+    );
+
+    return [...combined, ...sanitizedNew];
+  }
+
+  /**
+   * Get per-skill stats for the practice dashboard.
+   * One $facet aggregation → total + solved counts per topic in a single DB call.
+   */
+  async getPracticeStats(userId) {
+    const user = await User.findById(userId)
+      .select("skillElo solvedQuestionIds resumeProfile.skills")
+      .lean();
+
+    const skills = user?.resumeProfile?.skills ?? [];
+    const solvedIds = user?.solvedQuestionIds ?? [];
+
+    if (skills.length === 0) return [];
+
+    const [result] = await Question.aggregate([
+      {
+        $facet: {
+          totalByTopic: [
+            { $match: { topics: { $in: skills } } },
+            { $unwind: "$topics" },
+            { $match: { topics: { $in: skills } } },
+            { $group: { _id: "$topics", total: { $sum: 1 } } },
+          ],
+          solvedByTopic: [
+            { $match: { _id: { $in: solvedIds }, topics: { $in: skills } } },
+            { $unwind: "$topics" },
+            { $match: { topics: { $in: skills } } },
+            { $group: { _id: "$topics", solved: { $sum: 1 } } },
+          ],
+        },
+      },
+    ]);
+
+    const totalMap = Object.fromEntries(
+      result.totalByTopic.map((r) => [r._id, r.total]),
+    );
+    const solvedMap = Object.fromEntries(
+      result.solvedByTopic.map((r) => [r._id, r.solved]),
+    );
+
+    const skillElo = user?.skillElo ?? {};
+    const getElo = (skill) =>
+      typeof skillElo.get === "function"
+        ? skillElo.get(skill)
+        : skillElo[skill];
+
+    return skills.map((skill) => ({
+      name: skill,
+      elo: getElo(skill) ?? 1000,
+      total: totalMap[skill] ?? 0,
+      solved: solvedMap[skill] ?? 0,
+    }));
   }
 }
 

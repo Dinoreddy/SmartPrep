@@ -179,18 +179,28 @@ CRITICAL RULES:
   }
 
   /**
-   * Helper: Build a merged Elo map for the new skill list.
-   *
-   * Logic:
-   *  - If the skill already exists in the current map → keep its earned rating.
-   *  - If it's a brand-new skill → initialize to 1000.
-   *  - Skills NOT in the new list are simply omitted → entire map is replaced in DB,
-   *    so stale skills are purged automatically.
-   *
-   * @param {string[]} newSkills - Deduplicated list from the new resume + CORE_SKILLS.
-   * @param {Map|Object} currentElo - The user's existing skillElo map from MongoDB.
-   * @returns {Object} - Plain object suitable for a $set: { skillElo: ... } operation.
+   * Fetch the stored resume data for a user.
+   * Returns resumeProfile + skillElo — no sensitive fields.
    */
+  async getResume(userId) {
+    const user = await User.findById(userId)
+      .select("resumeProfile skillElo")
+      .lean();
+
+    if (!user) {
+      throw new ApiError(404, "User not found");
+    }
+
+    if (!user.resumeProfile?.hasUploaded) {
+      throw new ApiError(404, "No resume found. Please upload a resume first.");
+    }
+
+    return {
+      resumeProfile: user.resumeProfile,
+      skillElo: user.skillElo,
+    };
+  }
+
   mergeSkillElo(newSkills, currentElo) {
     const merged = {};
     // currentElo is a Mongoose Map — use .get() if available, otherwise bracket access.

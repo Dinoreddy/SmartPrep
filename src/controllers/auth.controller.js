@@ -6,14 +6,18 @@ import { ACCESS_COOKIE_OPTIONS, REFRESH_COOKIE_OPTIONS } from "../constants.js";
 const register = asyncHandler(async (req, res) => {
   const { fullName, email, username, password } = req.body;
 
-  const createdUser = await authService.registerUser({
+  const { user, accessToken, refreshToken } = await authService.registerUser({
     fullName,
     email,
     username,
     password,
   });
 
-  return sendSuccess(res, createdUser, "User registered successfully", 201);
+  res
+    .cookie("accessToken", accessToken, ACCESS_COOKIE_OPTIONS)
+    .cookie("refreshToken", refreshToken, REFRESH_COOKIE_OPTIONS);
+
+  return sendSuccess(res, { user }, "User registered successfully", 201);
 });
 
 const login = asyncHandler(async (req, res) => {
@@ -29,11 +33,7 @@ const login = asyncHandler(async (req, res) => {
     .cookie("accessToken", accessToken, ACCESS_COOKIE_OPTIONS)
     .cookie("refreshToken", refreshToken, REFRESH_COOKIE_OPTIONS);
 
-  return sendSuccess(
-    res,
-    { user, accessToken, refreshToken },
-    "User logged in successfully",
-  );
+  return sendSuccess(res, { user }, "User logged in successfully");
 });
 
 const logout = asyncHandler(async (req, res) => {
@@ -56,11 +56,7 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
     .cookie("accessToken", accessToken, ACCESS_COOKIE_OPTIONS)
     .cookie("refreshToken", refreshToken, REFRESH_COOKIE_OPTIONS);
 
-  return sendSuccess(
-    res,
-    { user, accessToken, refreshToken },
-    "Tokens refreshed successfully",
-  );
+  return sendSuccess(res, { user }, "Tokens refreshed successfully");
 });
 
 export { register, login, logout, refreshAccessToken };

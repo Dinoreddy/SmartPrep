@@ -26,6 +26,11 @@ export const getQuestions = asyncHandler(async (req, res) => {
   );
 });
 
+export const getPracticeStats = asyncHandler(async (req, res) => {
+  const stats = await questionService.getPracticeStats(req.user._id);
+  return sendSuccess(res, stats, "Practice stats fetched successfully.");
+});
+
 export const submitAnswer = asyncHandler(async (req, res) => {
   const { questionId, selectedOptionIndex } = req.body;
 

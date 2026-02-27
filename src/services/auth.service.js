@@ -47,14 +47,17 @@ class AuthService {
 
     // 3. Return only safe data
     const createdUser = await User.findById(user._id).select(
-      "-password -refreshToken",
+      "-password -refreshToken -createdAt -updatedAt -__v",
     );
 
     if (!createdUser) {
       throw new ApiError(500, "Failed to create user record");
     }
 
-    return createdUser;
+    // Auto-login: generate tokens immediately after registration
+    const { accessToken, refreshToken } = await this.generateTokens(user._id);
+
+    return { user: createdUser, accessToken, refreshToken };
   }
 
   /**
@@ -84,7 +87,7 @@ class AuthService {
     const { accessToken, refreshToken } = await this.generateTokens(user._id);
 
     const loggedInUser = await User.findById(user._id).select(
-      "-password -refreshToken",
+      "-password -refreshToken -createdAt -updatedAt -__v",
     );
 
     return { user: loggedInUser, accessToken, refreshToken };
@@ -136,7 +139,7 @@ class AuthService {
     const { accessToken, refreshToken } = await this.generateTokens(user._id);
 
     const safeUser = await User.findById(user._id).select(
-      "-password -refreshToken",
+      "-password -refreshToken -createdAt -updatedAt -__v",
     );
 
     return { user: safeUser, accessToken, refreshToken };
