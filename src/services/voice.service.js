@@ -18,7 +18,7 @@ const activePipelines = new Set();
  * @param {ReadableStream} stream
  * @returns {Promise<Buffer>}
  */
-async function streamToBuffer(stream) {
+export async function streamToBuffer(stream) {
   const chunks = [];
   for await (const chunk of stream) {
     chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
@@ -31,9 +31,10 @@ async function streamToBuffer(stream) {
  * the resulting audio buffer + text back to the client socket.
  *
  * @param {string} sentence - The sentence to synthesize.
- * @param {import("socket.io").Socket} socket
+ * @param {import("socket.io").Socket|null} socket - Socket to emit to (can be null if we just want to return the buffer)
+ * @returns {Promise<Buffer|null>} The synthesized audio buffer, or null on error
  */
-async function synthesizeAndEmit(sentence, socket) {
+export async function synthesizeAndEmit(sentence, socket = null) {
   const trimmed = sentence.trim();
   if (!trimmed) return;
 
@@ -56,15 +57,20 @@ async function synthesizeAndEmit(sentence, socket) {
 
     const audioBuffer = await streamToBuffer(stream);
     console.log(
-      `[TTS] OK — ${audioBuffer.byteLength} bytes in ${Date.now() - ttsStart}ms — emitting ai_audio_chunk`,
+      `[TTS] OK — ${audioBuffer.byteLength} bytes in ${Date.now() - ttsStart}ms`,
     );
 
-    socket.emit("ai_audio_chunk", {
-      audio: audioBuffer,
-      text: trimmed,
-    });
+    if (socket) {
+      socket.emit("ai_audio_chunk", {
+        audio: audioBuffer,
+        text: trimmed,
+      });
+    }
+
+    return audioBuffer;
   } catch (err) {
     console.error("[TTS] Failed to synthesize sentence:", trimmed, err);
+    return null;
   }
 }
 
@@ -145,8 +151,11 @@ async function processAudioStream(interviewId, audioBuffer, socket) {
     );
 
     interview.transcript.push({ role: "user", content: userText });
+
+    // Step 3b: Save user turn immediately so it's not lost if pipeline crashes later
+    await interview.save();
     console.log(
-      `[Pipeline] Step 3 — Appended user turn. New transcript length: ${interview.transcript.length}.`,
+      `[Pipeline] Step 3 — Appended user turn and saved to DB. New transcript length: ${interview.transcript.length}.`,
     );
 
     // ── 4. LLM streaming (Llama 3.3 70B) ────────────────────────────────────
@@ -154,14 +163,26 @@ async function processAudioStream(interviewId, audioBuffer, socket) {
       `[Pipeline] Step 4 — LLM: opening stream to llama-3.3-70b-versatile (${interview.transcript.length} messages in context)…`,
     );
     const llmStart = Date.now();
-    const llmStream = await groq.chat.completions.create({
-      model: "llama-3.3-70b-versatile",
-      messages: interview.transcript.map(({ role, content }) => ({
-        role,
-        content,
-      })),
-      stream: true,
-    });
+
+    // Add an AbortController for a 30s timeout protection against stalled streams
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      console.error(`[Pipeline] LLM stream timed out after 30s! Aborting...`);
+      controller.abort();
+    }, 30000);
+
+    const llmStream = await groq.chat.completions.create(
+      {
+        model: "llama-3.3-70b-versatile",
+        messages: interview.transcript.map(({ role, content }) => ({
+          role,
+          content,
+        })),
+        stream: true,
+      },
+      { signal: controller.signal },
+    );
+
     console.log(
       `[Pipeline] Step 4 — LLM stream opened in ${Date.now() - llmStart}ms. Consuming chunks…`,
     );
@@ -169,7 +190,6 @@ async function processAudioStream(interviewId, audioBuffer, socket) {
     // ── 5. Sentence buffering + TTS loop ────────────────────────────────────
     let currentSentence = "";
     let fullResponse = "";
-    const ttsPromises = [];
     let sentenceCount = 0;
     let tokenCount = 0;
 
@@ -182,41 +202,49 @@ async function processAudioStream(interviewId, audioBuffer, socket) {
       fullResponse += delta;
 
       // Flush complete sentences to TTS as soon as they're ready
-      // Match on ". ", "? ", "! " to avoid splitting on decimal numbers
-      const sentenceEndRegex = /[.?!]\s/;
+      // Match on ". ", "? ", "! " or at the end of string
+      const sentenceEndRegex = /[.?!](\s|$)/;
       let matchIndex;
 
       while ((matchIndex = currentSentence.search(sentenceEndRegex)) !== -1) {
-        // Include the punctuation character itself
-        const completeSentence = currentSentence.slice(0, matchIndex + 1);
-        currentSentence = currentSentence.slice(matchIndex + 2); // skip punct + space
+        // Wait... the match could be punctuation + space, or just punctuation + end of string.
+        // Let's find the exact length of the match
+        const matchStr = currentSentence.match(sentenceEndRegex)[0];
 
-        sentenceCount++;
-        console.log(
-          `[Pipeline] Step 5 — Sentence #${sentenceCount} flushed to TTS (${completeSentence.length} chars): "${completeSentence.slice(0, 55)}…"`,
+        // Include the punctuation and trailing space (if any)
+        const completeSentence = currentSentence.slice(
+          0,
+          matchIndex + matchStr.length,
         );
-        ttsPromises.push(synthesizeAndEmit(completeSentence, socket));
+        currentSentence = currentSentence.slice(matchIndex + matchStr.length); // skip punct + space
+
+        // Only process if there's actual text
+        if (completeSentence.trim()) {
+          sentenceCount++;
+          console.log(
+            `[Pipeline] Step 5 — Sentence #${sentenceCount} flushed to TTS (${completeSentence.length} chars): "${completeSentence.slice(0, 55)}…"`,
+          );
+
+          // AWAIT this sequentially so audio chunks arrive at the client strictly in order
+          await synthesizeAndEmit(completeSentence, socket);
+        }
       }
     }
 
-    // Flush any trailing text that didn't end with punctuation + space
+    // Clear the timeout since the stream finished naturally
+    clearTimeout(timeoutId);
+
+    // Flush any trailing text that didn't end with punctuation
     if (currentSentence.trim()) {
       sentenceCount++;
       console.log(
         `[Pipeline] Step 5 — Trailing sentence #${sentenceCount} flushed to TTS (${currentSentence.trim().length} chars).`,
       );
-      ttsPromises.push(synthesizeAndEmit(currentSentence, socket));
+      await synthesizeAndEmit(currentSentence, socket);
     }
 
     console.log(
-      `[Pipeline] Step 4/5 OK — LLM finished. Tokens: ~${tokenCount}, sentences: ${sentenceCount}, response: ${fullResponse.length} chars. Waiting for all TTS…`,
-    );
-
-    // Wait for ALL TTS synthesis to complete before committing + signalling done
-    const ttsWaitStart = Date.now();
-    await Promise.all(ttsPromises);
-    console.log(
-      `[Pipeline] Step 5 OK — All ${ttsPromises.length} TTS task(s) completed in ${Date.now() - ttsWaitStart}ms.`,
+      `[Pipeline] Step 4/5 OK — LLM and TTS finished. Tokens: ~${tokenCount}, sentences: ${sentenceCount}, response: ${fullResponse.length} chars.`,
     );
 
     // ── 6. Commit complete AI response to MongoDB ────────────────────────────
@@ -247,4 +275,8 @@ async function processAudioStream(interviewId, audioBuffer, socket) {
   }
 }
 
-export const voiceService = { processAudioStream };
+export const voiceService = {
+  processAudioStream,
+  streamToBuffer,
+  synthesizeAndEmit,
+};

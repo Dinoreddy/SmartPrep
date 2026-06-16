@@ -469,17 +469,27 @@
           <label for="base-url">Backend URL</label>
           <input
             id="base-url"
-            value="http://localhost:5000"
-            placeholder="http://localhost:5000"
+            value="http://localhost:3000"
+            placeholder="http://localhost:3000"
           />
         </div>
         <div class="field">
           <label for="email">Email</label>
-          <input id="email" type="email" placeholder="user@example.com" />
+          <input
+            id="email"
+            type="email"
+            placeholder="user@example.com"
+            value="test@gmail.com"
+          />
         </div>
         <div class="field">
           <label for="password">Password</label>
-          <input id="password" type="password" placeholder="••••••••" />
+          <input
+            id="password"
+            type="password"
+            placeholder="••••••••"
+            value="password123"
+          />
         </div>
       </div>
       <div class="actions">
@@ -654,7 +664,6 @@
       function renderSessionInfo() {
         const el = document.getElementById("session-info");
         el.innerHTML = `
-          <div class="chip">Token <span>${accessToken ? "✅ Obtained" : "—"}</span></div>
           <div class="chip">Interview ID <span>${interviewId || "—"}</span></div>
           <div class="chip">Socket <span id="chip-socket">Disconnected</span></div>
         `;
@@ -678,6 +687,7 @@
           const res = await fetch(`${baseUrl()}/api/v1/auth/login`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            credentials: "include", // Send auth cookies
             body: JSON.stringify({ email, password }),
           });
           const json = await res.json();
@@ -691,14 +701,6 @@
             return;
           }
 
-          accessToken = json?.data?.accessToken || json?.accessToken;
-          if (!accessToken) {
-            log("No accessToken in response — check response shape.", "error");
-            log("Full response: " + JSON.stringify(json), "warn");
-            return;
-          }
-
-          log(`✔ Access token obtained (${accessToken.length} chars).`, "ok");
           document.getElementById("btn-start").disabled = false;
           renderSessionInfo();
           setStatus("Logged in — ready to start a session.", "connected");
@@ -709,11 +711,6 @@
 
       // ── Step 1b: Start session (REST) ────────────────────────────────────
       async function startSession() {
-        if (!accessToken) {
-          log("Login first.", "warn");
-          return;
-        }
-
         logStep("SESSION INIT — POST /api/v1/interview/start");
         log("→ Sending request with Bearer token…", "info");
         const t0 = Date.now();
@@ -722,8 +719,8 @@
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${accessToken}`,
             },
+            credentials: "include", // Send auth cookies
           });
           const json = await res.json();
           log(
@@ -738,6 +735,7 @@
 
           interviewId = json?.data?.interviewId;
           const initialMessage = json?.data?.initialMessage;
+          const initialAudiob64 = json?.data?.initialAudio;
 
           if (!interviewId) {
             log("No interviewId in response: " + JSON.stringify(json), "error");
@@ -752,6 +750,20 @@
           renderSessionInfo();
 
           if (initialMessage) appendTranscript("assistant", initialMessage);
+          if (initialAudiob64) {
+            // Decode base64
+            const binaryString = atob(initialAudiob64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+              bytes[i] = binaryString.charCodeAt(i);
+            }
+            log(
+              `✔ Decoded ${bytes.byteLength} bytes of initial AI audio`,
+              "info",
+            );
+            playAudioBuffer(bytes.buffer, null);
+          }
           connectSocket();
         } catch (err) {
           log(`Network error: ${err.message}`, "error");
@@ -763,13 +775,13 @@
         const url = baseUrl();
         logStep("SOCKET — Connecting");
         log(
-          `→ io("${url}", { auth: { token }, transports: ["websocket"] })`,
+          `→ io("${url}", { transports: ["websocket"], withCredentials: true })`,
           "info",
         );
 
         socket = io(url, {
-          auth: { token: accessToken },
           transports: ["websocket"],
+          withCredentials: true,
         });
 
         socket.on("connect", () => {

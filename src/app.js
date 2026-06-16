@@ -9,9 +9,9 @@ const app = express();
 
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN,
+    origin: [process.env.CORS_ORIGIN, "http://127.0.0.1:5500"],
     credentials: true,
-  })
+  }),
 );
 
 app.use(bodyParser.json({ limit: "50mb" }));
@@ -20,7 +20,7 @@ app.use(
     limit: "50mb",
     extended: true,
     parameterLimit: 50000,
-  })
+  }),
 );
 
 // Parse cookies (needed for JWT auth via cookies)

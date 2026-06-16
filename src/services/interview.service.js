@@ -1,6 +1,10 @@
 import { User } from "../models/user.model.js";
 import { LiveInterview } from "../models/liveInterview.model.js";
 import { ApiError } from "../utils/ApiError.js";
+import { voiceService } from "./voice.service.js";
+import Groq from "groq-sdk";
+
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 const initializeInterview = async (userId) => {
   console.log(`[Interview] ── START initializeInterview ── userId: ${userId}`);
@@ -44,10 +48,11 @@ Here are their core projects and architectural implementations:
 ${formattedProjects}
 
 RULES:
-1. This is a VOICE interview. Keep your responses short, conversational, and natural. 
-2. Do not use markdown, code blocks, or bullet points.
-3. Start by welcoming the candidate and immediately asking a deep architectural question about one of their projects.
-4. Always end your turn with a single, clear question.`;
+1. VOICE INTERVIEW FORMAT: Keep your responses short, conversational, and natural. Do not use markdown, code blocks, or bullet points.
+2. PROGRESSIVE QUESTIONING: When discussing a project, start with standard/basic questions to understand their role and the general architecture. 
+3. DRILL DOWN: As the candidate explains the project, ask progressively deeper, more complex questions based on their answers. Probe into trade-offs, edge cases, scalability bottlenecks, and specific technical decisions they made. 
+4. STAY FOCUSED: Do not jump between projects quickly. Stay focused on a single project until you have comprehensively evaluated their technical depth on it.
+5. SINGLE QUESTION: Always end your turn with a single, clear, focused question.`;
 
   console.log(
     `[Interview] Step 3 OK — System prompt built (${systemPrompt.length} chars).`,
@@ -59,39 +64,84 @@ RULES:
 
   console.log(`[Interview] Step 4 OK — First project: "${firstProjectName}"`);
 
-  // 5. Initialize Transcript
+  // 5. Generate Dynamic Greeting
   console.log(
-    `[Interview] Step 5 — Building initial transcript (system + assistant seed)…`,
+    `[Interview] Step 5 — Generating dynamic greeting using LLM for project: "${firstProjectName}"…`,
+  );
+
+  const greetingPrompt = `Write a short, conversational, 1-2 sentence greeting for the candidate. Welcome them, briefly express interest in their background, and immediately ask them a high-level or fundamental question specifically about their project named "${firstProjectName}" to get them started talking about it. Do not use markdown, bullet points, or list formatting. Keep it strictly conversational and easy to speak out loud.`;
+
+  let dynamicGreeting = `Hello! It is great to meet you. I was looking over your resume and I am really impressed by your background. Let's dive right in. I see you built ${firstProjectName}. Can you walk me through the high-level architecture and the main technical challenges you faced?`; // Fallback
+
+  try {
+    const completion = await groq.chat.completions.create({
+      messages: [{ role: "user", content: greetingPrompt }],
+      model: "llama-3.3-70b-versatile",
+      temperature: 0.7,
+    });
+    if (completion.choices[0]?.message?.content) {
+      dynamicGreeting = completion.choices[0].message.content.trim();
+    }
+    console.log(
+      `[Interview] Step 5 OK — Dynamic greeting generated: "${dynamicGreeting.slice(0, 80)}…"`,
+    );
+  } catch (error) {
+    console.error(
+      `[Interview] Step 5 WARN — Failed to generate dynamic greeting, using fallback.`,
+      error,
+    );
+  }
+
+  // 6. Initialize Transcript
+  console.log(
+    `[Interview] Step 6 — Building initial transcript (system + assistant seed)…`,
   );
   const transcript = [
     { role: "system", content: systemPrompt },
     {
       role: "assistant",
-      content: `Hello! It is great to meet you. I was looking over your resume and I am really impressed by your background. Let's dive right in. I see you built ${firstProjectName}. Can you walk me through the high-level architecture and the main technical challenges you faced?`,
+      content: dynamicGreeting,
     },
   ];
 
   console.log(
-    `[Interview] Step 5 OK — Transcript initialised with ${transcript.length} messages.`,
+    `[Interview] Step 6 OK — Transcript initialised with ${transcript.length} messages.`,
   );
 
-  // 6. Create Document
+  // 7. Create Document
   console.log(
-    `[Interview] Step 6 — Persisting LiveInterview document to MongoDB…`,
+    `[Interview] Step 7 — Persisting LiveInterview document to MongoDB…`,
   );
   const newInterview = await LiveInterview.create({
     user: userId,
     transcript,
   });
 
-  console.log(`[Interview] Step 6 OK — Document created: ${newInterview._id}`);
+  console.log(`[Interview] Step 7 OK — Document created: ${newInterview._id}`);
 
-  // 7. Return
+  // 8. Synthesize Initial Message Audio
+  console.log(
+    `[Interview] Step 8 — Synthesizing initial message audio via Deepgram TTS…`,
+  );
+  const initialAudioBuffer = await voiceService.synthesizeAndEmit(
+    transcript[1].content,
+    null,
+  );
+
+  if (!initialAudioBuffer) {
+    console.error(
+      `[Interview] Step 8 FAILED — Could not synthesize initial audio.`,
+    );
+    throw new ApiError(500, "Failed to generate initial audio greeting");
+  }
+
+  // 9. Return
   console.log(
     `[Interview] ── DONE initializeInterview — interviewId: ${newInterview._id} ──`,
   );
   return {
     interviewId: newInterview._id,
+    initialAudio: initialAudioBuffer,
     initialMessage: transcript[1].content,
   };
 };
