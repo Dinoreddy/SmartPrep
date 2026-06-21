@@ -1,6 +1,7 @@
 import Groq, { toFile } from "groq-sdk";
 import { createClient } from "@deepgram/sdk";
 import { LiveInterview } from "../models/liveInterview.model.js";
+import { AI_MODELS } from "../constants.js";
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const deepgram = createClient(process.env.DEEPGRAM_API_KEY);
@@ -46,7 +47,7 @@ export async function synthesizeAndEmit(sentence, socket = null) {
     const ttsStart = Date.now();
     const response = await deepgram.speak.request(
       { text: trimmed },
-      { model: "aura-asteria-en", encoding: "linear16", sample_rate: 16000 },
+      { model: AI_MODELS.TTS_AURA, encoding: "linear16", sample_rate: 16000 },
     );
 
     const stream = await response.getStream();
@@ -113,7 +114,7 @@ async function processAudioStream(interviewId, audioBuffer, socket) {
 
     const transcription = await groq.audio.transcriptions.create({
       file,
-      model: "whisper-large-v3-turbo",
+      model: AI_MODELS.STT_WHISPER,
     });
 
     const userText = transcription.text?.trim();
@@ -173,7 +174,7 @@ async function processAudioStream(interviewId, audioBuffer, socket) {
 
     const llmStream = await groq.chat.completions.create(
       {
-        model: "llama-3.3-70b-versatile",
+        model: AI_MODELS.LLM_HEAVY,
         messages: interview.transcript.map(({ role, content }) => ({
           role,
           content,

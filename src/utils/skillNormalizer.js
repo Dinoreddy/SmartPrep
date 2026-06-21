@@ -86,8 +86,18 @@ const SKILL_MAP = {
 
   // Other
   git: "Git",
-  figma: "Figma",
 };
+
+// Skills that should be explicitly ignored
+const IGNORED_SKILLS = new Set([
+  "vscode", "vs code", "visual studio code", "intellij", "eclipse", "pycharm", "vim",
+  "figma", "adobe xd", "photoshop", "canva", "illustrator",
+  "jira", "trello", "slack", "agile", "scrum", "notion",
+  "flutterflow", "webflow", "bubble", "wordpress", "wix",
+  "windows", "macos", "linux", "ubuntu",
+  "microsoft office", "excel", "word", "powerpoint",
+  "leadership", "communication", "teamwork", "time management", "problem solving"
+]);
 
 /**
  * Converts a raw skill string to its canonical form.
@@ -101,6 +111,9 @@ export function normalizeSkill(skill) {
   if (!skill || typeof skill !== "string") return "";
 
   const key = skill.trim().toLowerCase();
+
+  // Explicitly ignore garbage skills
+  if (IGNORED_SKILLS.has(key)) return null;
 
   if (SKILL_MAP[key]) return SKILL_MAP[key];
 

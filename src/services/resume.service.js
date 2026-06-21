@@ -4,7 +4,7 @@ import Groq from "groq-sdk";
 import { User } from "../models/user.model.js";
 import { ApiError } from "../utils/ApiError.js";
 import { normalizeSkillList } from "../utils/skillNormalizer.js";
-import { CORE_SKILLS } from "../constants.js";
+import { CORE_SKILLS, AI_MODELS } from "../constants.js";
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -145,7 +145,8 @@ Return ONLY a valid JSON object. Do not include markdown formatting or backticks
 CRITICAL RULES:
 1. DO NOT summarize heavily. If the resume mentions "Sequelize transactions", "Redis caching", or "Cloudinary CDN", they MUST be in the context or techStack.
 2. You must return the 'context' object for every single project.
-3. SKILL NAME NORMALIZATION — This is mandatory. You must map every technology to its single canonical name using the rules below. The goal is that two resumes describing the same skill must always produce the IDENTICAL string.
+3. EXCLUDE NON-ENGINEERING SKILLS: STRICTLY EXCLUDE all IDEs/Editors (VS Code, IntelliJ, Eclipse), design tools (Figma, Adobe XD, Photoshop), project management software (Jira, Trello), operating systems (Windows, macOS), generic software (Excel, Word), low-code tools (FlutterFlow, Webflow), and soft skills (Leadership, Communication). ONLY extract core programming languages, frameworks, databases, cloud infrastructure, and architectural concepts.
+4. SKILL NAME NORMALIZATION — This is mandatory. You must map every technology to its single canonical name using the rules below. The goal is that two resumes describing the same skill must always produce the IDENTICAL string.
 
    CANONICAL NAME RULES:
    - Databases: "MySQL", "PostgreSQL", "MariaDB", "SQL", "Relational DB", "RDBMS" → always output "SQL"
@@ -165,7 +166,7 @@ CRITICAL RULES:
     try {
       const completion = await groq.chat.completions.create({
         messages: [{ role: "user", content: prompt }],
-        model: "llama-3.3-70b-versatile",
+        model: AI_MODELS.LLM_HEAVY,
         temperature: 0.1,
         response_format: { type: "json_object" }, // FORCES STRICT JSON
       });

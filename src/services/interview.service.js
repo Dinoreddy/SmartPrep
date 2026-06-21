@@ -3,6 +3,7 @@ import { LiveInterview } from "../models/liveInterview.model.js";
 import { ApiError } from "../utils/ApiError.js";
 import { voiceService } from "./voice.service.js";
 import Groq from "groq-sdk";
+import { AI_MODELS } from "../constants.js";
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -76,7 +77,7 @@ RULES:
   try {
     const completion = await groq.chat.completions.create({
       messages: [{ role: "user", content: greetingPrompt }],
-      model: "llama-3.3-70b-versatile",
+      model: AI_MODELS.LLM_LIGHT,
       temperature: 0.7,
     });
     if (completion.choices[0]?.message?.content) {

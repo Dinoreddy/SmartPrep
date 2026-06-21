@@ -2,6 +2,7 @@ import Groq from "groq-sdk";
 import { Question } from "../models/question.model.js";
 import { User } from "../models/user.model.js";
 import { generateQuestionsWithGroq } from "../utils/aiHelper.js";
+import { taxonomyService } from "./taxonomy.service.js";
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -81,11 +82,25 @@ class QuestionService {
       `[Cache Miss] Generating ${stillMissing} ${difficulty} questions for "${topic}" (userElo: ${userElo})...`,
     );
 
+    // Get targeted sub-topic
+    const targetSubTopic = await taxonomyService.getTargetedSubTopic(topic);
+    const subTopicName = targetSubTopic ? targetSubTopic.name : null;
+
+    // Fetch anti-context
+    const existing = await Question.find({ topics: topic })
+      .sort({ createdAt: -1 })
+      .select("text")
+      .limit(10)
+      .lean();
+    const antiContextTexts = [...new Set(existing.map((q) => q.text))];
+
     const parsedQuestions = await generateQuestionsWithGroq(
       groq,
       topic,
       stillMissing,
       difficulty,
+      subTopicName,
+      antiContextTexts
     );
 
     const questionsToSave = parsedQuestions.map((q) => ({
@@ -98,6 +113,9 @@ class QuestionService {
 
     if (questionsToSave.length > 0) {
       await Question.insertMany(questionsToSave);
+      if (subTopicName) {
+        await taxonomyService.incrementSubTopicCount(topic, subTopicName, questionsToSave.length);
+      }
     }
 
     // Strip server-only fields from freshly generated questions before returning

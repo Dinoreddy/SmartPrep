@@ -1,12 +1,12 @@
+import "dotenv/config";
 import mongoose from "mongoose";
-import dotenv from "dotenv";
 import Groq from "groq-sdk";
 import { User } from "../src/models/user.model.js";
 import { Question } from "../src/models/question.model.js";
 import { generateQuestionsWithGroq } from "../src/utils/aiHelper.js";
 import { DB_NAME } from "../src/constants.js";
+import { taxonomyService } from "../src/services/taxonomy.service.js";
 
-dotenv.config();
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const MONGO_URI = process.env.MONGO_URI;
@@ -18,9 +18,7 @@ const BATCH_CONFIG = [
   { count: 5, difficulty: "Hard", elo: 1500 },
 ];
 
-// Max retries per chunk when the AI returns an empty/invalid response
-const MAX_CHUNK_RETRIES = 3;
-const CHUNK_SIZE = 10;
+const CHUNK_SIZE = 5;
 
 async function connectDB() {
   if (mongoose.connection.readyState === 0) {
@@ -29,32 +27,27 @@ async function connectDB() {
   }
 }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function getUniqueSkills() {
   const uniqueSkills = await User.distinct("resumeProfile.skills");
   return uniqueSkills.filter((s) => s && s.trim().length > 0);
 }
 
-/**
- * Returns how many questions already exist in the DB for a given skill + difficulty.
- */
 async function countExisting(skill, difficulty) {
   return Question.countDocuments({ topics: skill, difficulty });
 }
 
-async function generateQuestionsForSkill(skill, count, difficulty, elo) {
-  const parsed = await generateQuestionsWithGroq(
-    groq,
-    skill,
-    count,
-    difficulty,
-  );
-  return parsed.map((q) => ({
-    ...q,
-    difficulty,
-    eloRating: elo,
-    source: "AI_Groq_Seed",
-    isVerified: false,
-  }));
+async function fetchAntiContextTexts(skill, subTopicName, limit = 10) {
+  // Fetch recent questions for this skill to avoid duplicates.
+  const existing = await Question.find({ topics: skill })
+    .sort({ createdAt: -1 })
+    .select("text")
+    .limit(limit)
+    .lean();
+
+  // Ensure unique texts
+  return [...new Set(existing.map((q) => q.text))];
 }
 
 async function seed() {
@@ -63,72 +56,79 @@ async function seed() {
     await connectDB();
 
     const skills = await getUniqueSkills();
-    console.log(
-      `\n🔍 Found ${skills.length} unique skill(s): ${skills.join(", ")}\n`,
-    );
+    console.log(`\n🔍 Found ${skills.length} unique skill(s): ${skills.join(", ")}\n`);
 
     for (const skill of skills) {
-      console.log(`👉 Processing skill: "${skill}"`);
+      console.log(`\n👉 Processing skill: "${skill}"`);
 
       for (const config of BATCH_CONFIG) {
-        // ─── Smart check: how many already exist? ────────────────────────────
-        const existing = await countExisting(skill, config.difficulty);
-        const needed = config.count - existing;
+        const existingCount = await countExisting(skill, config.difficulty);
+        const needed = config.count - existingCount;
 
         if (needed <= 0) {
-          console.log(
-            `   [${config.difficulty}] ✅ Already has ${existing}/${config.count} — skipping.`,
-          );
+          console.log(`   [${config.difficulty}] ✅ Already has ${existingCount}/${config.count} — skipping.`);
           continue;
         }
 
-        console.log(
-          `   [${config.difficulty}] Has ${existing}/${config.count} — generating ${needed} more...`,
-        );
-        // ─────────────────────────────────────────────────────────────────────
+        console.log(`   [${config.difficulty}] Has ${existingCount}/${config.count} — generating ${needed} more...`);
 
         let generatedCount = 0;
 
         while (generatedCount < needed) {
           const batchSize = Math.min(CHUNK_SIZE, needed - generatedCount);
-          let questions = [];
-          let attempt = 0;
+          
+          // 1. Get targeted sub-topic
+          const targetSubTopic = await taxonomyService.getTargetedSubTopic(skill);
+          const subTopicName = targetSubTopic ? targetSubTopic.name : null;
+          
+          console.log(`      🎯 Targeted Sub-Topic: ${subTopicName || "General"}`);
 
-          while (attempt < MAX_CHUNK_RETRIES) {
-            questions = await generateQuestionsForSkill(
-              skill,
-              batchSize,
-              config.difficulty,
-              config.elo,
-            );
+          // 2. Fetch anti-context
+          const antiContextTexts = await fetchAntiContextTexts(skill, subTopicName || skill);
 
-            if (questions.length > 0) break;
+          // 3. Generate
+          const parsedQuestions = await generateQuestionsWithGroq(
+            groq,
+            skill,
+            batchSize,
+            config.difficulty,
+            subTopicName,
+            antiContextTexts
+          );
 
-            attempt++;
-            console.warn(
-              `      ⚠️  Empty response for chunk. Retry ${attempt}/${MAX_CHUNK_RETRIES}...`,
-            );
-          }
-
-          if (questions.length === 0) {
-            console.error(
-              `      ❌ Failed after ${MAX_CHUNK_RETRIES} retries. Skipping remaining [${config.difficulty}] questions.`,
-            );
+          if (!parsedQuestions || parsedQuestions.length === 0) {
+            console.error(`      ❌ Failed to generate chunk. Skipping remaining [${config.difficulty}] questions.`);
             break;
           }
 
-          await Question.insertMany(questions);
-          generatedCount += questions.length;
-          console.log(
-            `      ✅ Saved ${questions.length} questions. (${existing + generatedCount}/${config.count})`,
-          );
+          const questionsToSave = parsedQuestions.map((q) => ({
+            ...q,
+            difficulty: config.difficulty,
+            eloRating: config.elo,
+            source: "AI_Groq_Seed",
+            isVerified: false,
+            // Ensure topic array is set to the main skill
+            topics: [skill],
+          }));
+
+          await Question.insertMany(questionsToSave);
+          
+          // 4. Update taxonomy counts
+          if (subTopicName) {
+            await taxonomyService.incrementSubTopicCount(skill, subTopicName, questionsToSave.length);
+          }
+
+          generatedCount += questionsToSave.length;
+          console.log(`      ✅ Saved ${questionsToSave.length} questions. (${existingCount + generatedCount}/${config.count})`);
+          
+          // Artificial delay to respect free tier rate limits (8 seconds)
+          console.log(`      ⏳ Sleeping for 8 seconds to respect Groq rate limits...`);
+          await sleep(8000);
         }
       }
-
-      console.log();
     }
 
-    console.log("✅ Seeding Complete!");
+    console.log("\n✅ Seeding Complete!");
     process.exit(0);
   } catch (error) {
     console.error("❌ Fatal error:", error);

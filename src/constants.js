@@ -39,3 +39,11 @@ export const CORE_SKILLS = [
   "Software Testing",
   "CI/CD"
 ];
+
+// AI Model Constants
+export const AI_MODELS = {
+  LLM_HEAVY: "llama-3.3-70b-versatile", // For complex tasks: Resume extraction, Question generation, Live Interview
+  LLM_LIGHT: "llama-3.1-8b-instant",    // For simpler tasks: Greetings, Taxonomy generation
+  STT_WHISPER: "whisper-large-v3-turbo",
+  TTS_AURA: "aura-asteria-en",
+};
