@@ -1,6 +1,7 @@
 import { User } from "../models/user.model.js";
 import { Question } from "../models/question.model.js";
 import { MockTest } from "../models/mockTest.model.js";
+import { EloHistory } from "../models/eloHistory.model.js";
 import { ApiError } from "../utils/ApiError.js";
 import { CORE_SKILLS } from "../constants.js";
 import { calculateElo } from "../utils/eloCalculator.js";
@@ -234,7 +235,8 @@ class MockTestService {
     if (!user) throw new ApiError(404, "User not found");
 
     // Mutable in-memory Elo snapshot (carries updates across same-topic questions)
-    const skillEloSnapshot = Object.fromEntries(user.skillElo ?? new Map());
+    const initialSkillEloSnapshot = Object.fromEntries(user.skillElo ?? new Map());
+    const skillEloSnapshot = { ...initialSkillEloSnapshot };
 
     // Fetch all live question Elo ratings in a single query
     const questionIds = test.questions.map((q) => q.questionId);
@@ -299,6 +301,22 @@ class MockTestService {
       ]),
     );
 
+    const eloHistoryDocs = [];
+    for (const [skill, newElo] of Object.entries(skillEloSnapshot)) {
+      const oldElo = initialSkillEloSnapshot[skill] ?? 1000;
+      if (oldElo !== newElo) {
+        eloHistoryDocs.push({
+          user: userId,
+          skill,
+          oldElo,
+          newElo,
+          eloChange: newElo - oldElo,
+          sourceType: "MCQ_PRACTICE",
+          sourceId: testId,
+        });
+      }
+    }
+
     await Promise.all([
       test.save(),
       User.findByIdAndUpdate(userId, {
@@ -306,6 +324,7 @@ class MockTestService {
         $addToSet: { solvedQuestionIds: { $each: correctQuestionIds } },
       }),
       bulkOps.length > 0 ? Question.bulkWrite(bulkOps) : Promise.resolve(),
+      eloHistoryDocs.length > 0 ? EloHistory.insertMany(eloHistoryDocs) : Promise.resolve(),
     ]);
 
     return {
@@ -313,6 +332,64 @@ class MockTestService {
       score,
       totalQuestions: test.totalQuestions,
       percentage,
+    };
+  }
+
+  async getMockTestStats(userId) {
+    const user = await User.findById(userId).select("skillElo");
+    if (!user) throw new ApiError(404, "User not found");
+
+    const aggregation = await MockTest.aggregate([
+      { $match: { user: userId, status: "COMPLETED" } },
+      {
+        $group: {
+          _id: null,
+          totalTests: { $sum: 1 },
+          averageScore: { $avg: "$percentage" },
+        },
+      },
+    ]);
+
+    let totalTests = 0;
+    let averageScore = 0;
+    if (aggregation.length > 0) {
+      totalTests = aggregation[0].totalTests;
+      averageScore = Math.round(aggregation[0].averageScore);
+    }
+
+    let strongestSkill = "N/A";
+    let maxElo = -1;
+    if (user.skillElo) {
+      for (const [skill, elo] of user.skillElo.entries()) {
+        if (elo > maxElo) {
+          maxElo = elo;
+          strongestSkill = skill;
+        }
+      }
+    }
+
+    const recentTests = await MockTest.find({ user: userId, status: "COMPLETED" })
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .lean();
+
+    const formattedHistory = recentTests.map((t) => {
+      const skillsInvolved = [
+        ...new Set((t.questions || []).map((q) => q.topic).filter(Boolean)),
+      ];
+      return {
+        id: t._id,
+        date: t.createdAt,
+        score: Math.round(t.percentage),
+        skillsInvolved,
+      };
+    });
+
+    return {
+      totalTests,
+      averageScore,
+      strongestSkill,
+      recentTests: formattedHistory,
     };
   }
 }

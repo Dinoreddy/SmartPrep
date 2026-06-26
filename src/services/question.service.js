@@ -105,40 +105,33 @@ class QuestionService {
 
     const questionsToSave = parsedQuestions.map((q) => ({
       ...q,
+      topics: [topic], // Force exact topic match to prevent AI hallucination (e.g. "ReactJS" instead of "React")
       difficulty,
       eloRating: baseElo,
       source: "AI_Groq",
       isVerified: false,
     }));
 
+    let insertedQuestions = [];
     if (questionsToSave.length > 0) {
-      await Question.insertMany(questionsToSave);
+      insertedQuestions = await Question.insertMany(questionsToSave);
       if (subTopicName) {
         await taxonomyService.incrementSubTopicCount(topic, subTopicName, questionsToSave.length);
       }
     }
 
     // Strip server-only fields from freshly generated questions before returning
-    const sanitizedNew = questionsToSave.map(
-      ({
-        text,
-        options,
-        correctOptionIndex,
-        explanation,
-        difficulty,
-        eloRating,
-        topics,
-        _id,
-      }) => ({
-        _id,
-        text,
-        options,
-        correctOptionIndex,
-        explanation,
-        difficulty,
-        eloRating,
-        topics,
-      }),
+    const sanitizedNew = insertedQuestions.map(
+      (doc) => ({
+        _id: doc._id,
+        text: doc.text,
+        options: doc.options,
+        correctOptionIndex: doc.correctOptionIndex,
+        explanation: doc.explanation,
+        difficulty: doc.difficulty,
+        eloRating: doc.eloRating,
+        topics: doc.topics,
+      })
     );
 
     return [...combined, ...sanitizedNew];
@@ -153,7 +146,11 @@ class QuestionService {
       .select("skillElo solvedQuestionIds resumeProfile.skills")
       .lean();
 
-    const skills = user?.resumeProfile?.skills ?? [];
+    const resumeSkills = user?.resumeProfile?.skills ?? [];
+    const skillEloKeys = user?.skillElo ? Object.keys(user.skillElo) : [];
+    
+    // Create a union of resume skills and any skills they have an Elo rating for
+    const skills = [...new Set([...resumeSkills, ...skillEloKeys])];
     const solvedIds = user?.solvedQuestionIds ?? [];
 
     if (skills.length === 0) return [];

@@ -39,6 +39,17 @@ const liveInterviewSchema = new Schema(
     completedAt: {
       type: Date,
     },
+    // New analytics fields
+    score: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: null, // null until graded
+    },
+    feedback: {
+      type: String,
+      default: null,
+    },
   },
   { timestamps: true },
 );

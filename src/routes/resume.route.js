@@ -3,6 +3,7 @@ import {
   uploadResume,
   updateResume,
   getResume,
+  manuallyUpdateProfile,
 } from "../controllers/resume.controller.js";
 import { verifyJWT } from "../middlewares/auth.middleware.js";
 import { upload } from "../middlewares/multer.middleware.js";
@@ -25,5 +26,6 @@ router.put(
 );
 
 router.get("/", verifyJWT, getResume);
+router.patch("/profile", verifyJWT, manuallyUpdateProfile);
 
 export default router;

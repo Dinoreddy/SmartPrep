@@ -1,6 +1,7 @@
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
 import { voiceService } from "./services/voice.service.js";
+import { interviewService } from "./services/interview.service.js";
 import { LiveInterview } from "./models/liveInterview.model.js";
 
 /**
@@ -160,6 +161,11 @@ export function initializeSocket(server) {
         socket.emit("interview_ended", {
           interviewId,
           message: "Interview wrapped up successfully",
+        });
+
+        // Trigger asynchronous AI grading (fire-and-forget)
+        interviewService.gradeInterview(interviewId).catch((err) => {
+          console.error(`[Socket.io] Error in async interview grading:`, err);
         });
       } catch (err) {
         console.error("[Socket.io] Error ending interview:", err);

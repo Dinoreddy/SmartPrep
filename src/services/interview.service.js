@@ -147,4 +147,60 @@ RULES:
   };
 };
 
-export const interviewService = { initializeInterview };
+const gradeInterview = async (interviewId) => {
+  console.log(`[Interview Grading] ── START ── interviewId: ${interviewId}`);
+  const interview = await LiveInterview.findById(interviewId);
+  
+  if (!interview || interview.score !== null) {
+    console.log(`[Interview Grading] Skipped. Not found or already graded.`);
+    return;
+  }
+
+  // Filter out the system prompt, keep only user and assistant
+  const conversation = interview.transcript
+    .filter((t) => t.role !== "system")
+    .map((t) => `${t.role.toUpperCase()}: ${t.content}`)
+    .join("\n\n");
+
+  if (conversation.length < 50) {
+    console.log(`[Interview Grading] Transcript too short to grade.`);
+    interview.score = 0;
+    interview.feedback = "Interview was too short to evaluate.";
+    await interview.save();
+    return;
+  }
+
+  const prompt = `
+You are an expert Senior Engineering Manager evaluating a candidate's voice interview transcript.
+Review the conversation below and assign a score out of 100 based on their technical accuracy, problem-solving, and communication clarity.
+Also provide a brief 2-3 sentence feedback summary directly addressing the candidate.
+
+TRANSCRIPT:
+${conversation}
+
+Respond strictly in JSON format:
+{
+  "score": <number 0-100>,
+  "feedback": "<string>"
+}
+`;
+
+  try {
+    const completion = await groq.chat.completions.create({
+      messages: [{ role: "user", content: prompt }],
+      model: AI_MODELS.LLM_HEAVY,
+      temperature: 0.1,
+      response_format: { type: "json_object" },
+    });
+
+    const parsed = JSON.parse(completion.choices[0].message.content);
+    interview.score = parsed.score;
+    interview.feedback = parsed.feedback;
+    await interview.save();
+    console.log(`[Interview Grading] ── DONE ── Score: ${parsed.score}`);
+  } catch (error) {
+    console.error(`[Interview Grading] Error grading interview:`, error);
+  }
+};
+
+export const interviewService = { initializeInterview, gradeInterview };

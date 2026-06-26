@@ -8,6 +8,11 @@ export const getConfig = asyncHandler(async (req, res) => {
   return sendSuccess(res, config, "Test configuration fetched successfully");
 });
 
+export const getMockTestStats = asyncHandler(async (req, res) => {
+  const stats = await mockTestService.getMockTestStats(req.user._id);
+  return sendSuccess(res, stats, "Mock test stats fetched successfully");
+});
+
 export const startTest = asyncHandler(async (req, res) => {
   const { selectedSkills } = req.body;
 

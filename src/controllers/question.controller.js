@@ -5,6 +5,7 @@ import { questionService } from "../services/question.service.js";
 import { calculateElo } from "../utils/eloCalculator.js";
 import { Question } from "../models/question.model.js";
 import { User } from "../models/user.model.js";
+import { EloHistory } from "../models/eloHistory.model.js";
 
 export const getQuestions = asyncHandler(async (req, res) => {
   const { topic, limit = 5 } = req.query;
@@ -83,6 +84,21 @@ export const submitAnswer = asyncHandler(async (req, res) => {
       User.findByIdAndUpdate(req.user._id, {
         $addToSet: { solvedQuestionIds: questionId },
       }),
+    );
+  }
+
+  // Log Elo History if changed
+  if (userElo !== newUserElo) {
+    dbUpdates.push(
+      EloHistory.create({
+        user: req.user._id,
+        skill: topic,
+        oldElo: userElo,
+        newElo: newUserElo,
+        eloChange: newUserElo - userElo,
+        sourceType: "MCQ_PRACTICE",
+        sourceId: questionId,
+      })
     );
   }
 

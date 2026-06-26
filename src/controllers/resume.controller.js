@@ -44,3 +44,11 @@ export const getResume = asyncHandler(async (req, res) => {
   const resumeData = await resumeService.getResume(req.user._id);
   return sendSuccess(res, resumeData, "Resume data fetched successfully.");
 });
+
+export const manuallyUpdateProfile = asyncHandler(async (req, res) => {
+  const updatedUser = await resumeService.updateProfileManually(
+    req.user._id,
+    req.body
+  );
+  return sendSuccess(res, updatedUser.resumeProfile, "Profile updated successfully.", 200);
+});

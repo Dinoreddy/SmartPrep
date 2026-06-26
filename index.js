@@ -3,6 +3,7 @@ import http from "http";
 import app from "./src/app.js";
 import { connectDB } from "./src/db/index.js";
 import { initializeSocket } from "./src/socket.js";
+import { startCronJobs } from "./src/jobs/cronJobs.js";
 
 const PORT = Number(process.env.PORT) || 3000;
 
@@ -17,6 +18,7 @@ connectDB()
     server.listen(PORT, () => {
       console.log(`Server is running on port ${PORT}`);
       console.log(`Socket.io is ready on the same port`);
+      startCronJobs();
     });
   })
   .catch((err) => {

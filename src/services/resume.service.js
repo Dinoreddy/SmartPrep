@@ -216,6 +216,39 @@ CRITICAL RULES:
     });
     return merged;
   }
+
+  async updateProfileManually(userId, updateData) {
+    const user = await User.findById(userId);
+    if (!user) throw new ApiError(404, "User not found");
+
+    if (!user.resumeProfile?.hasUploaded) {
+      throw new ApiError(400, "No resume found. Please upload a resume first before editing.");
+    }
+
+    const { seniority, yoe, skills, projects } = updateData;
+
+    // Build the dot-notation update object to prevent overwriting whole resumeProfile
+    const updateQuery = {};
+    
+    if (seniority !== undefined) updateQuery["resumeProfile.seniority"] = seniority;
+    if (yoe !== undefined) updateQuery["resumeProfile.yoe"] = yoe;
+    if (projects !== undefined) updateQuery["resumeProfile.projects"] = projects;
+    
+    // If skills are updated, we must also reconcile the skillElo map
+    if (skills !== undefined && Array.isArray(skills)) {
+      updateQuery["resumeProfile.skills"] = skills;
+      const mergedElo = this.mergeSkillElo(skills, user.skillElo || {});
+      updateQuery["skillElo"] = mergedElo;
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { $set: updateQuery },
+      { new: true, runValidators: true } // Return updated doc, run schema validation
+    ).select("-password -refreshToken");
+
+    return updatedUser;
+  }
 }
 
 export const resumeService = new ResumeService();
