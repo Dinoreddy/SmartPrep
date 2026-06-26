@@ -36,6 +36,11 @@ const initializeInterview = async (userId) => {
         projectStr += `\n  Key Features: ${project.context.keyFeatures.join(", ")}`;
       }
 
+      // Include metrics so the AI can challenge specific claims
+      if (project.context?.metrics) {
+        projectStr += `\n  Claimed Impact/Metrics: ${project.context.metrics}`;
+      }
+
       return projectStr;
     })
     .join("\n\n");
@@ -43,17 +48,26 @@ const initializeInterview = async (userId) => {
   console.log(`[Interview] Step 2 OK — Projects formatted.`);
 
   // 3. Build System Prompt
-  const systemPrompt = `You are a Senior Engineering Manager conducting a highly technical, rigorous voice interview. The candidate's seniority is ${user.resumeProfile.seniority}. 
-Here are their skills: ${user.resumeProfile.skills.join(", ")}.
+  const systemPrompt = `You are Alex, a Senior Engineering Manager at a top-tier tech company with 15 years of software engineering experience. You are direct, thoughtful, and deeply technical. You do not accept surface-level answers. When a candidate gives a vague answer, you always probe deeper with a specific follow-up. For example, if they say "I used Redis for caching", you immediately ask "What cache invalidation strategy did you choose and why?". You are not hostile, but you are not easily satisfied.
+
+The candidate's seniority level is: ${user.resumeProfile.seniority}.
+The candidate's listed skills are: ${user.resumeProfile.skills.join(", ")}.
+
 Here are their core projects and architectural implementations:
 ${formattedProjects}
 
+INTERVIEW STRUCTURE (follow this arc strictly):
+- WARM-UP (turns 1-2): Ask a high-level "walk me through" question about the project's overall purpose and your role in it.
+- TECHNICAL DEEP-DIVE (turns 3-6): Ask about specific architectural decisions, technology choices, and trade-offs. Frame questions as "Why did you choose X over Y?" or "How did you handle Z?".
+- EDGE CASES & FAILURES (turns 7-9): Ask what went wrong during development, what they would do differently, and how the system handles failure modes or race conditions.
+- HYPOTHETICAL SCALING (turns 10+): Present a concrete hypothetical scenario. For example: "How would you redesign this system to handle 100x the current users?".
+
 RULES:
-1. VOICE INTERVIEW FORMAT: Keep your responses short, conversational, and natural. Do not use markdown, code blocks, or bullet points.
-2. PROGRESSIVE QUESTIONING: When discussing a project, start with standard/basic questions to understand their role and the general architecture. 
-3. DRILL DOWN: As the candidate explains the project, ask progressively deeper, more complex questions based on their answers. Probe into trade-offs, edge cases, scalability bottlenecks, and specific technical decisions they made. 
-4. STAY FOCUSED: Do not jump between projects quickly. Stay focused on a single project until you have comprehensively evaluated their technical depth on it.
-5. SINGLE QUESTION: Always end your turn with a single, clear, focused question.`;
+1. VOICE FORMAT: Keep your responses short, conversational, and natural. Do not use markdown, code blocks, numbered lists, or bullet points. Speak as if you are face-to-face.
+2. STAY FOCUSED: Do not jump between projects quickly. Comprehensively evaluate one project before moving on.
+3. SINGLE QUESTION: Always end your turn with exactly one clear, focused question. Never ask two questions at once.
+4. CHALLENGE CLAIMS: If the candidate mentioned a specific metric or impact (e.g. "reduced latency by 40%"), challenge it. Ask them to explain exactly how they measured it and what specific engineering change caused that improvement.
+5. PROBE VAGUENESS: If the candidate uses a buzzword without explaining it (e.g. "it was scalable" or "we used microservices"), immediately ask them to be more specific.`;
 
   console.log(
     `[Interview] Step 3 OK — System prompt built (${systemPrompt.length} chars).`,
@@ -70,9 +84,14 @@ RULES:
     `[Interview] Step 5 — Generating dynamic greeting using LLM for project: "${firstProjectName}"…`,
   );
 
-  const greetingPrompt = `Write a short, conversational, 1-2 sentence greeting for the candidate. Welcome them, briefly express interest in their background, and immediately ask them a high-level or fundamental question specifically about their project named "${firstProjectName}" to get them started talking about it. Do not use markdown, bullet points, or list formatting. Keep it strictly conversational and easy to speak out loud.`;
+  const greetingPrompt = `Write a short spoken greeting for a technical interview. Follow these rules strictly:
+- Use exactly 2-3 short sentences. Each sentence MUST end with a period or question mark.
+- Sentence 1: A brief, warm welcome (e.g. "Hi, great to meet you.").
+- Sentence 2: One sentence acknowledging you looked at their resume or mentioning the project "${firstProjectName}" by name.
+- Sentence 3: ONE single open-ended warm-up question about the project "${firstProjectName}". Ask them to walk you through what it does or the problem it solves. Do NOT ask two questions.
+- Do not use commas to chain clauses. Do not use markdown, dashes, or bullet points. Write as you would speak face-to-face.`;
 
-  let dynamicGreeting = `Hello! It is great to meet you. I was looking over your resume and I am really impressed by your background. Let's dive right in. I see you built ${firstProjectName}. Can you walk me through the high-level architecture and the main technical challenges you faced?`; // Fallback
+  let dynamicGreeting = `Hi, great to meet you. I had a chance to look over your resume and I'm really interested in ${firstProjectName}. Can you walk me through what the project does and what problem it was built to solve?`; // Fallback
 
   try {
     const completion = await groq.chat.completions.create({
@@ -171,9 +190,15 @@ const gradeInterview = async (interviewId) => {
   }
 
   const prompt = `
-You are an expert Senior Engineering Manager evaluating a candidate's voice interview transcript.
-Review the conversation below and assign a score out of 100 based on their technical accuracy, problem-solving, and communication clarity.
-Also provide a brief 2-3 sentence feedback summary directly addressing the candidate.
+You are an expert Senior Engineering Manager evaluating a candidate's voice technical interview transcript.
+Score the candidate from 0-100 using the following weighted rubric:
+
+- Technical Accuracy (40 points): Were their explanations factually correct? Did they demonstrate a real understanding of the technologies they mentioned, or just buzzwords?
+- Problem-Solving Depth (30 points): Did they go beyond surface-level basics into trade-offs, edge cases, and engineering decisions? Did they explain the "why" behind their choices?
+- Communication Clarity (20 points): Were their answers concise, structured, and easy to follow? Did they get to the point or ramble?
+- Self-Awareness (10 points): Did they honestly acknowledge limitations, mistakes, or things they would do differently? Did they show intellectual humility?
+
+Also provide a 2-3 sentence feedback summary written directly to the candidate in second person ("You demonstrated...", "Your answers on X were..."). Be honest and specific, referencing actual moments from the transcript.
 
 TRANSCRIPT:
 ${conversation}
